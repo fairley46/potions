@@ -2,6 +2,8 @@
 
 **[Play it →](https://fairley46.github.io/potions/)**
 
+![POTIONS — Act I](screenshot.png)
+
 ---
 
 A 2D pixel sidescroller in two acts. One sitting. No save point — it doesn't need one.
