@@ -163,3 +163,36 @@ These are designed but not in v0.4:
 - **The dog doesn't fight back** — currently it's a shadow monster like everyone else. The design intent: small, won't attack, but blocks the path. The player has to decide.
 - **Sprite pass** — figures are chunky rect-humanoids. A 2-frame walk cycle and hurt flash are the biggest visual win available.
 - **Platforming / LEAP mechanic** — gaps only clearable while buzzed was in the design but isn't in the world geometry yet.
+
+---
+
+## Design directions (aspirational)
+
+These aren't built and aren't scheduled — they're ideas worth holding.
+
+### Jumping over bottles
+
+Right now potions are proximity auto-collect. The player has no way to refuse one except to not walk near it. The idea: let the player jump over a bottle to avoid picking it up. This makes every potion a visible, physical choice — you can take it or you can clear it. The bottles that are hard to jump make the choice harder. The game teaches you there's a way out and puts the decision in your hands every single time.
+
+### Turning back early / Day 1 as a first run
+
+The idea: if the player turns around before reaching the light — just stops, faces west, walks home — that becomes its own path. Maybe it's how you learn the game exists. Day 1 is the run where you choose not to go all the way. It changes the end card, changes what Act II means. The design question is whether you want players to discover this or be told about it — probably discover it.
+
+This also implies a multi-run structure: the first playthrough is the trap. The second is the knowledge. The game state should know which run it is, and the world (and possibly the people in it) should respond differently.
+
+### The Act II potion — physical interaction
+
+Right now the potion at x:180 is collect-or-ignore. The design intent is that the player should be able to *do something* to it — knock it away, jump over it, push past it deliberately. The choice should feel like a choice, not an accident of where you walk. If you can jump over the bottles in Act I, you should be able to jump over this one too. That consistency closes the loop: you knew how to do it the whole time.
+
+### End state branching
+
+These direction changes all affect the end card. Some candidate states:
+
+| How you played | End card changes |
+|---|---|
+| Drank everything, took Act II potion | "day one starts again" |
+| Drank everything, didn't take Act II potion | "you needed zero on the way back" |
+| Turned back before the light | TBD — needs its own ending |
+| Jumped over bottles / some restraint | End card could reflect the count differently |
+
+The end card is where the meaning lands. Branch it carefully — each ending should feel earned, not like a score.
