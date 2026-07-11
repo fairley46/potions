@@ -1,8 +1,1090 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta http-equiv="refresh" content="0; url=potions.html">
-<link rel="canonical" href="potions.html">
+<meta charset="UTF-8">
+<title>POTIONS — a prototype</title>
+<style>
+  html,body{margin:0;padding:0;background:#0a0a12;height:100%;overflow:hidden}
+  #wrap{display:flex;align-items:center;justify-content:center;height:100vh}
+  canvas{image-rendering:pixelated;image-rendering:crisp-edges}
+</style>
 </head>
-<body></body>
+<body>
+<div id="wrap"><canvas id="screen"></canvas></div>
+<script>
+"use strict";
+/* ============================================================
+   POTIONS — prototype v0.1
+   A 2D sidescroller about the way there, and the way back.
+   Act 1: potions feel like power. Act 2: you see what they cost.
+   ============================================================ */
+
+const VW = 320, VH = 180;               // internal pixel resolution
+const buf = document.createElement("canvas");
+buf.width = VW; buf.height = VH;
+const bctx = buf.getContext("2d");
+const screen = document.getElementById("screen");
+const sctx = screen.getContext("2d");
+
+function fit(){
+  const s = Math.max(1, Math.floor(Math.min(innerWidth/VW, innerHeight/VH)));
+  screen.width = VW*s; screen.height = VH*s;
+  sctx.imageSmoothingEnabled = false;
+}
+addEventListener("resize", fit); fit();
+
+/* ---------- input ---------- */
+const keys = {};
+const PREVENT = ["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," ","Space"];
+addEventListener("keydown", e=>{
+  if(PREVENT.includes(e.key)) e.preventDefault();
+  if(!keys[e.key]) pressed[e.key] = true;
+  keys[e.key] = true;
+  initAudio();
+  if(e.key==="m"||e.key==="M") musicOn = !musicOn;
+});
+addEventListener("keyup", e=>{ keys[e.key] = false; });
+let pressed = {};
+const L = ()=>keys["ArrowLeft"]||keys["a"]||keys["A"];
+const R = ()=>keys["ArrowRight"]||keys["d"]||keys["D"];
+const JUMP = ()=>pressed["ArrowUp"]||pressed["w"]||pressed["W"]||pressed[" "]||pressed["k"]||pressed["K"];
+const ATK  = ()=>pressed["j"]||pressed["J"]||pressed["x"]||pressed["X"];
+const CONFIRM = ()=>pressed["Enter"]||pressed[" "]||pressed["j"]||pressed["J"];
+
+/* ---------- crisp text overlay (drawn at full screen res) ---------- */
+let TQ = [];
+function T(str,x,y,size,col,align="left",a=1,bold=false){ TQ.push({str,x,y,size,col,align,a,bold}); }
+function flushText(){
+  const S = screen.width/VW;
+  for(const q of TQ){
+    sctx.globalAlpha = q.a;
+    sctx.fillStyle = q.col;
+    sctx.font = (q.bold?"bold ":"") + Math.max(9,(q.size*S)|0) + 'px "Courier New",monospace';
+    sctx.textAlign = q.align;
+    sctx.fillText(q.str, q.x*S, q.y*S);
+  }
+  sctx.globalAlpha = 1; sctx.textAlign = "left";
+  TQ.length = 0;
+}
+
+/* ---------- audio: midi-simple, that's the elegance ---------- */
+let AC=null, masterG=null, musicOn=true, mstep=0, nextT=0;
+function initAudio(){
+  if(AC) return;
+  try{
+    AC = new (window.AudioContext||window.webkitAudioContext)();
+    masterG = AC.createGain(); masterG.gain.value = 0.15; masterG.connect(AC.destination);
+  }catch(e){ AC=null; }
+  if(AC && AC.state==="suspended") AC.resume();
+}
+function tone(f,t0,dur,type="square",vol=0.4,slide=0){
+  if(!AC||!musicOn) return;
+  const o=AC.createOscillator(), g=AC.createGain();
+  o.type=type; o.frequency.setValueAtTime(Math.max(20,f),t0);
+  if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(20,f*slide),t0+dur);
+  g.gain.setValueAtTime(0.0001,t0);
+  g.gain.exponentialRampToValueAtTime(vol,t0+0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+  o.connect(g); g.connect(masterG);
+  o.start(t0); o.stop(t0+dur+0.03);
+}
+function noiseHit(t0,dur,vol=0.3,cut=1200){
+  if(!AC||!musicOn) return;
+  const n=(AC.sampleRate*dur)|0, b=AC.createBuffer(1,n,AC.sampleRate), d=b.getChannelData(0);
+  for(let i=0;i<n;i++) d[i]=(Math.random()*2-1)*(1-i/n);
+  const s=AC.createBufferSource(); s.buffer=b;
+  const f=AC.createBiquadFilter(); f.type="lowpass"; f.frequency.value=cut;
+  const g=AC.createGain(); g.gain.value=vol;
+  s.connect(f); f.connect(g); g.connect(masterG); s.start(t0);
+}
+/* one melody, two lives: forward+bright on the way out, reversed+slow on the way back */
+const MEL  = [0,4,7,12,9,7,4,7, 0,4,7,12,14,12,9,7];
+const BASS = [0,0,-5,-5,-3,-3,-5,2];
+function musicTick(){
+  if(!AC||!musicOn) return;
+  if(state!=="act1" && state!=="act2"){ nextT = AC.currentTime; return; }
+  const act2 = state==="act2";
+  const wd = state==="act1" && player.elixir<=0;
+  const bpm = act2? 60 : (wd? 104 : 146);
+  const spb = 60/bpm/2;
+  if(nextT < AC.currentTime) nextT = AC.currentTime;
+  while(nextT < AC.currentTime + 0.15){
+    const i = mstep % 16;
+    const seq = act2? MEL[15-i] : MEL[i];
+    const det = wd? 0.94 : 1;                        // withdrawal detunes the world
+    const f = (act2? 110:220) * Math.pow(2, seq/12) * det;
+    tone(f, nextT, spb*(act2?1.6:0.9), act2?"triangle":"square", act2?0.20:0.14);
+    if(!act2) tone(f*2, nextT+spb*0.5, spb*0.35, "square", 0.04);      // sparkle echo layer
+    if(act2 && i===0) tone(f/2, nextT, spb*10, "sine", 0.05);          // pad swell each bar
+    if(i%2===0){
+      const b = BASS[((mstep/2)|0)%8];
+      tone((act2?55:110)*Math.pow(2,b/12)*det, nextT, spb*1.8, act2?"sine":"triangle", act2?0.22:0.18);
+    }
+    if(!act2 && i%4===2) noiseHit(nextT, 0.03, 0.08, 4000);   // hi-hat drive
+    mstep++; nextT += spb;
+  }
+}
+function sfx(k){
+  if(!AC||!musicOn) return;
+  const t = AC.currentTime;
+  if(k==="potion"){ tone(440,t,0.07,"square",0.28); tone(660,t+0.07,0.07,"square",0.28); tone(880,t+0.14,0.14,"square",0.28); }
+  else if(k==="punch") noiseHit(t,0.05,0.22,2200);
+  else if(k==="kill"){ tone(320,t,0.12,"sawtooth",0.2,0.4); noiseHit(t,0.09,0.2,900); }
+  else if(k==="hurt") tone(150,t,0.16,"sawtooth",0.26,0.55);
+  else if(k==="break") noiseHit(t,0.28,0.42,520);
+  else if(k==="no") tone(170,t,0.22,"triangle",0.26,0.75);
+  else if(k==="heart"){ tone(55,t,0.09,"sine",0.5,0.85); tone(50,t+0.13,0.07,"sine",0.3,0.85); }
+  else if(k==="jump") tone(240,t,0.1,"square",0.1,1.7);
+  else if(k==="land") noiseHit(t,0.04,0.12,700);
+}
+
+/* ---------- world ---------- */
+const GROUND = 150;
+const W1 = 2600;                        // world length
+const GOAL_X = W1 - 50;
+const HOME_X = 30;
+
+/* saturation-aware color helper: h,s,l with global desat factor */
+let SAT = 1;                            // 0..1.2 global saturation
+function C(h,s,l){ return `hsl(${h},${Math.max(0,Math.min(100,s*SAT))}%,${l}%)`; }
+
+/* ---------- loved ones (the reveal) ---------- */
+/* two lines each: what they say if you cut them down — and if you walked past */
+const LOVED = [
+  {x: 430,  name:"MOM",      line:"She was trying to take it from you.",            spared:"She never let go. She won't now."},
+  {x: 820,  name:"GRANDMA",  line:"She just wanted you to stay for dinner.",        spared:"Dinner's still warm. It always will be."},
+  {x: 1240, name:"DANNY",    line:"Your brother. He called every Sunday, for a while.", spared:"Your brother. He still calls every Sunday."},
+  {x: 1650, name:"SARAH",    line:"She waited longer than anyone.",                 spared:"She's still waiting. Walk faster."},
+  {x: 2050, name:"YOUR DOG", line:"He never understood why the walks stopped.",     spared:"He knew you'd come back. Dogs know."},
+  {x: 2350, name:"YOU",      line:"This one was always the hardest fight.",         spared:"Still here. Still you."},
+];
+
+/* ---------- entities ---------- */
+let player, enemies, potions, particles, state, cam;
+let msg = null;                          // {text, sub, t}
+let shake = 0, fade = 0, fadeDir = 0;
+let turnLines, turnIdx, endT, act2Spoken;
+let walls, a2pots, barOffer, popDone, resisted, tookOne, buzz2, darkHinted, wallHintCd;
+function takeOne(){ tookOne = true; buzz2 = 3; flashT = 0.14; sfx("potion"); }
+let mobs, spawnT, surge;                 // the buzzsaw
+let hbT=0, pulseV=0, flashT=0, revealHold=0;   // heartbeat / juice / act2 pauses
+
+/* days survive between runs */
+let day = 1;
+try{ day = parseInt(localStorage.getItem("potions_day"))||1; }catch(e){}
+function saveDay(){ try{ localStorage.setItem("potions_day", String(day)); }catch(e){} }
+
+const CROWD = ["a friend from college","your coworker","your roommate","your neighbor",
+               "a guy from the bar","your teammate","someone you barely knew","a friend since grade school"];
+
+function makeEnemies(){
+  return LOVED.map((p,i)=>({
+    x:p.x, y:GROUND, hp: i===5? 6:3, dir:-1, t:Math.random()*6.28, hurt:0, lunge:0,
+    dead:false, deadT:0, id:i
+  }));
+}
+function makePotions(){
+  const arr = [];
+  const xs = [200,360,560,720,900,1120,1300,1480,1700,1950,2180,2400];
+  for(const x of xs) arr.push({x, y:GROUND-10, taken:false, t:Math.random()*6.28});  // on the ground: you can jump over every one
+  return arr;
+}
+
+/* the level itself demands potions */
+const WALLS = [{x:700},{x:1560}];        // only break while buzzed
+const DARK  = {a:1150, b:1520};          // only see while buzzed
+
+function reset(){
+  player = { x:60, y:GROUND, vx:0, vy:0, face:1, onGround:true,
+             hp:100, elixir:70, tol:0, buzz:0, atk:0, atkCd:0, hurt:0,
+             potionsDrunk:0, frame:0, dead:0, checkpoint:60, kills:[], grab:0, avoided:0 };
+  mobs = []; spawnT = 2.5; surge = false;
+  hbT = 0; pulseV = 0; flashT = 0; revealHold = 0;
+  enemies = makeEnemies();
+  potions = makePotions();
+  particles = [];
+  cam = 0; msg = null; shake=0; fade=0; fadeDir=0;
+  act2Spoken = LOVED.map(()=>false);
+  walls = WALLS.map(w=>({x:w.x, broken:false, hp:10}));
+  a2pots = [{x:180, taken:false, counted:false, t:0}];
+  barOffer = {resolved:false, warned:false, t:0};
+  popDone = false; resisted = 0;
+  tookOne = false; buzz2 = 0; darkHinted = false; wallHintCd = 0;
+  state = "title";
+}
+reset();
+
+/* ---------- drawing helpers ---------- */
+function rect(x,y,w,h,col){ bctx.fillStyle = col; bctx.fillRect(x|0,y|0,w|0,h|0); }
+
+/* ---------- pixel sprites: outlined, palette-indexed, NES-plus chunk ---------- */
+/* chars: o outline · h hair · s skin · e eye · c shirt · p pants · b boots · . empty */
+const SPR_HEAD = [
+  "...oooooo...",
+  "..ohhhhhho..",
+  ".ohhhhhhhho.",
+  ".osssssso...",
+  ".osesseso...",
+  "..osssso....",
+];
+const SPR_TORSO = [
+  "..occccco...",
+  ".occccccco..",
+  ".oscccccso..",
+  "..occccco...",
+  "..opppppo...",
+  "..opppppo...",
+];
+const SPR_TORSO_PUNCH = [
+  "..occccco...",
+  ".occcccoosso",
+  ".osccccco...",
+  "..occccco...",
+  "..opppppo...",
+  "..opppppo...",
+];
+const SPR_LEGS_IDLE = [
+  "..opp.ppo...",
+  "..opp.ppo...",
+  "..obb.bbo...",
+  ".obbo.obbo..",
+];
+const SPR_LEGS_A = [
+  "..op..ppo...",
+  ".opp...po...",
+  ".obo...bo...",
+  "obbo...obo..",
+];
+const SPR_LEGS_B = [
+  "..opp..po...",
+  "..op...ppo..",
+  "..ob...obo..",
+  "..obo..obbo.",
+];
+function spriteRows(opt){
+  const torso = opt.punch? SPR_TORSO_PUNCH : SPR_TORSO;
+  const legs = opt.moving? (((opt.frame/5)|0)%2? SPR_LEGS_A : SPR_LEGS_B) : SPR_LEGS_IDLE;
+  return SPR_HEAD.concat(torso, legs);
+}
+function drawSprite(rows, x, y, pal, flip, s=2){
+  const w = rows[0].length, h = rows.length;
+  const x0 = (x - (w*s>>1))|0, y0 = (y - h*s)|0;
+  for(let r=0;r<h;r++){
+    const row = rows[r];
+    for(let c=0;c<w;c++){
+      const ch = flip? row[w-1-c] : row[c];
+      if(ch===".") continue;
+      const col = pal[ch]; if(!col) continue;
+      bctx.fillStyle = col;
+      bctx.fillRect(x0+c*s, y0+r*s, s, s);
+    }
+  }
+}
+/* same signature as before — everything downstream keeps working */
+function drawFigure(x,y,opt){
+  const pal = {
+    o: "#12121e",
+    h: opt.hair, s: opt.skin, c: opt.shirt, p: opt.pants,
+    b: opt.boots || C(230,15,16),
+    e: opt.eye || "#12121e",
+  };
+  drawSprite(spriteRows(opt), x, y, pal, (opt.face||1)<0, 2);
+}
+function drawShadowMonster(x,y,e){
+  // the exact same body as a person — that's the point — swallowed in shadow
+  SAT_push(1);
+  const bob = Math.sin(e.t*3)*1.5;
+  const body = e.hurt>0? "#9a94b8" : "#0d0918";
+  const pal = { o:"#070510", h:body, s:body, c:body, p:body, b:body,
+                e: e.hurt>0? "#ffffff" : C(350,90,58) };
+  drawSprite(spriteRows({moving:true, frame:(e.t*10)|0, punch:e.lunge>0.6}),
+             x, y+bob*0.5, pal, e.dir<0, 2);
+  SAT_pop();
+}
+
+function drawLovedOne(x,y,i,near){
+  const p = [["#e8b48f","#b05a7a","#6b5a70","#d8d0c8"],   // mom
+             ["#e0c0a0","#8a86b8","#7a7488","#e8e8ea"],   // grandma
+             ["#d8a878","#5a7a9a","#4a4a5a","#5a4638"],   // danny
+             ["#e8bc98","#c88a5a","#6a5a6a","#8a5a3a"],   // sarah
+             null,                                        // dog
+             ["#d8a878","#7a4a5a","#3a3a4a","#3a3028"]][i];// you
+  if(i===4){ // the dog
+    const c1 = C(30,40,55), c2 = C(30,40,35);
+    rect(x-7,y-8,14,6,c1); rect(x+5,y-12,6,6,c1); rect(x-6,y-3,2,3,c2);
+    rect(x+3,y-3,2,3,c2); rect(x+8,y-14,2,3,c2); rect(x-9,y-7,3,2,c2);
+    bctx.fillStyle="#1c1c24"; bctx.fillRect(x+8,y-10,1,1);
+    return;
+  }
+  drawFigure(x,y,{skin:p[0],shirt:p[1],pants:p[2],hair:p[3],face: x>player.x?-1:1, frame:0, moving:false});
+}
+
+let _satStack=[];
+function SAT_push(v){ _satStack.push(SAT); SAT=v; }
+function SAT_pop(){ SAT=_satStack.pop(); }
+
+/* ---------- background ---------- */
+function drawBG(){
+  const night = state==="act2";
+  // sky gradient (banded, pixel style)
+  const skyTop = night? [230,20,10] : [205,70,62];
+  const skyBot = night? [235,15,22] : [28,85,72];
+  for(let i=0;i<12;i++){
+    const t=i/11;
+    const h=skyTop[0]+(skyBot[0]-skyTop[0])*t;
+    const s=skyTop[1]+(skyBot[1]-skyTop[1])*t;
+    const l=skyTop[2]+(skyBot[2]-skyTop[2])*t;
+    rect(0, i*15, VW, 15, C(h,s,l));
+  }
+  // sun with glow / cold moon
+  if(!night){
+    const sx = 250-cam*0.05;
+    bctx.fillStyle=`hsla(45,${90*SAT}%,80%,0.25)`; bctx.fillRect(sx-6,18,26,26);
+    bctx.fillStyle=`hsla(45,${90*SAT}%,80%,0.18)`; bctx.fillRect(sx-12,12,38,38);
+    rect(sx, 24, 14, 14, C(45,95,75));
+    rect(sx+2, 26, 10, 10, C(48,100,85));
+  } else {
+    const mx = 60-cam*0.05;
+    bctx.fillStyle="rgba(200,205,225,0.08)"; bctx.fillRect(mx-6,14,22,22);
+    rect(mx, 20, 10, 10, C(220,20,80));
+    rect(mx+2, 22, 3, 3, C(220,15,62));
+  }
+  // clouds / low fog
+  for(let i=0;i<4;i++){
+    const cx = ((i*137 - cam*0.15) % (VW+80) + VW+80) % (VW+80) - 40;
+    if(!night){
+      bctx.fillStyle=`hsla(30,${35*SAT}%,88%,0.45)`;
+      bctx.fillRect(cx, 22+i*13, 44, 6);
+      bctx.fillRect(cx+9, 18+i*13, 26, 4);
+    } else {
+      bctx.fillStyle="rgba(160,160,180,0.08)";
+      bctx.fillRect(cx-24, 96+i*16, 110, 7);
+    }
+  }
+  // far hills
+  for(let i=-1;i<9;i++){
+    const hx = i*180 - (cam*0.25)%180;
+    rect(hx, 96, 130, 60, night? C(240,18,20): C(150,45,30));
+    rect(hx+30, 84, 70, 70, night? C(245,16,16): C(155,50,24));
+  }
+  // mid trees
+  for(let i=-1;i<12;i++){
+    const tx = i*130 - (cam*0.6)%130;
+    rect(tx+20, 112, 6, 38, night? C(250,12,14): C(25,45,25));
+    rect(tx+10, 96, 26, 22, night? C(250,14,18): C(115,45,28));
+  }
+  // ground
+  rect(0, GROUND, VW, VH-GROUND, night? C(245,14,17): C(95,40,26));
+  rect(0, GROUND, VW, 3, night? C(245,12,26): C(95,45,38));
+  // ground detail: grass lip, path stones, speckle
+  rect(0, GROUND+3, VW, 1, night? C(245,10,12): C(95,40,20));
+  for(let i=0;i<14;i++){
+    const gx = (i*61 - cam)%(VW+60);
+    rect(gx, GROUND+8+(i%3)*6, 5, 2, night? C(245,10,12): C(95,35,20));
+  }
+  for(let i=0;i<7;i++){
+    const sx = ((i*127 - cam) % (VW+60) + VW+60) % (VW+60) - 20;
+    rect(sx, GROUND+3, 9, 3, night? C(245,8,21): C(40,25,34));
+    rect(sx+2, GROUND+3, 5, 1, night? C(245,8,26): C(40,25,42));
+  }
+  drawLandmarks();
+}
+
+/* the same places, twice: adventure on the way out, your life on the way back */
+const LANDMARKS = [
+  {x:500,  label:"your old school", ly:64},
+  {x:1010, label:"the dorms",       ly:72},
+  {x:1700, label:"the office",      ly:94},
+  {x:2120, label:"the bar",         ly:44},
+];
+function drawLandmarks(){
+  const real = state==="act2";
+  for(let i=0;i<LANDMARKS.length;i++){
+    const lm = LANDMARKS[i];
+    const x = (lm.x - cam)|0;
+    if(x<-90||x>VW+90) continue;
+    if(!real){
+      if(i===0){ // castle keep
+        rect(x-30,GROUND-56,60,56,C(260,25,30));
+        for(let b=0;b<5;b++) rect(x-30+b*13,GROUND-62,7,6,C(260,25,30));
+        rect(x-4,GROUND-78,4,22,C(260,20,24)); rect(x,GROUND-78,10,6,C(350,70,50));
+        rect(x-8,GROUND-30,8,12,C(260,20,18)); rect(x+8,GROUND-40,6,6,C(55,80,65));
+      } else if(i===1){ // twin spires
+        rect(x-26,GROUND-70,16,70,C(250,25,28)); rect(x+10,GROUND-84,16,84,C(250,25,24));
+        rect(x-30,GROUND-78,24,8,C(250,25,32)); rect(x+6,GROUND-92,24,8,C(250,25,28));
+        rect(x-22,GROUND-50,6,6,C(55,80,60)); rect(x+14,GROUND-60,6,6,C(55,80,60));
+      } else if(i===2){ // dark tower
+        rect(x-16,GROUND-95,32,95,C(240,20,18));
+        for(let wy=0;wy<6;wy++) rect(x-8,GROUND-88+wy*14,4,5,C(55,90,60));
+        rect(x-20,GROUND-100,40,7,C(240,20,14));
+      } else { // the glowing den
+        rect(x-28,GROUND-40,56,40,C(280,30,22));
+        rect(x-10,GROUND-26,20,26,C(285,70,45));
+        bctx.fillStyle=`hsla(285,${70*SAT}%,60%,0.25)`; bctx.fillRect(x-16,GROUND-32,32,32);
+      }
+    } else {
+      if(i===0){ // school
+        rect(x-30,GROUND-40,60,40,C(15,25,34));
+        for(let w=0;w<4;w++) rect(x-24+w*14,GROUND-32,8,8,C(50,20,55));
+        rect(x-4,GROUND-14,8,14,C(15,20,22));
+        rect(x+34,GROUND-52,2,52,C(0,0,40)); rect(x+36,GROUND-52,8,5,C(220,15,60));
+      } else if(i===1){ // dorms
+        rect(x-26,GROUND-64,52,64,C(230,10,30));
+        for(let r=0;r<5;r++) for(let c=0;c<4;c++)
+          rect(x-20+c*12,GROUND-58+r*12,6,6,(r*4+c)%5? C(230,8,20): C(50,25,50));
+      } else if(i===2){ // office
+        rect(x-18,GROUND-88,36,88,C(210,12,26));
+        for(let wy=0;wy<8;wy++) rect(x-14,GROUND-82+wy*10,28,3,C(210,10,38));
+      } else { // the bar
+        rect(x-24,GROUND-30,48,30,C(20,15,22));
+        rect(x-18,GROUND-36,36,7,C(340,25,35));
+        rect(x-6,GROUND-14,10,14,C(20,12,15));
+      }
+      if(Math.abs(lm.x-player.x)<90)
+        T(lm.label, x, GROUND-lm.ly, 5, "rgba(195,195,210,0.75)", "center", 0.85);
+    }
+  }
+}
+
+/* ---------- goal & home ---------- */
+function drawGoal(){
+  const gx = GOAL_X - cam;
+  if(gx<-40||gx>VW+40) return;
+  const pulse = Math.sin(performance.now()/300)*6;
+  // radiant light
+  for(let i=4;i>0;i--){
+    bctx.fillStyle = `hsla(48,${90*SAT}%,${60+i*6}%,${0.10*i})`;
+    bctx.fillRect(gx-10-i*6-pulse/2, GROUND-60-i*8, 34+i*12+pulse, 60+i*8);
+  }
+  rect(gx-8, GROUND-52, 22, 52, C(46,90,60));
+  rect(gx-4, GROUND-44, 14, 44, C(48,100,78));
+}
+function drawHome(){
+  const hx = HOME_X - cam;
+  if(hx<-60||hx>VW+60) return;
+  rect(hx-18, GROUND-26, 40, 26, C(28,45,42));
+  rect(hx-22, GROUND-34, 48, 9, C(10,55,30));
+  rect(hx-14, GROUND-30, 40, 5, C(10,55,34));
+  rect(hx-4, GROUND-14, 9, 14, C(35,40,22));
+  // warm window — the only warm color left in act 2
+  SAT_push(1);
+  rect(hx+8, GROUND-20, 7, 7, "hsl(45,95%,70%)");
+  SAT_pop();
+}
+
+/* ---------- particles ---------- */
+function puff(x,y,col,n=6,spd=40){
+  for(let i=0;i<n;i++) particles.push({x,y,vx:(Math.random()-0.5)*spd,vy:(Math.random()-0.9)*spd,t:0.5+Math.random()*0.4,col});
+}
+
+/* ---------- HUD ---------- */
+function drawHUD(){
+  if(state!=="act1" && state!=="act2") return;
+  // health
+  rect(6,6,54,7,"rgba(0,0,0,0.5)");
+  rect(7,7,52*(player.hp/100),5, player.hp>35? C(0,75,50): C(0,90,60));
+  T("YOU", 62, 12, 6, "#eee");
+  if(state==="act1"){
+    // elixir
+    rect(6,16,54,7,"rgba(0,0,0,0.5)");
+    rect(7,17,52*(player.elixir/100),5, C(285,80,60));
+    T("ELIXIR", 62, 22, 6, "#eee");
+    // tolerance ticks
+    for(let i=0;i<player.tol;i++) rect(6+i*4, 26, 3, 3, C(285,60,45));
+    if(player.tol>0) T("NEED", 6+Math.min(player.tol,20)*4+3, 30, 5, "#bbb");
+    if(player.potionsDrunk>0){
+      rect(6,34,4,6,C(285,85,62)); rect(7,32,2,2,C(285,60,40));
+      T("x"+player.potionsDrunk, 13, 40, 5, "#c9a9e0");
+    }
+    if(player.avoided>0) T("passed: "+player.avoided, 6, 48, 5, "#9cc9a9");
+    if(day>1) T("day "+day, 6, 56, 5, "#8a8a9c");
+  } else {
+    T("NO ELIXIR LEFT ANYWHERE", 6, 22, 6, "#9a9aa8");
+  }
+}
+
+/* ---------- messages ---------- */
+function say(text, sub, t=3.2){ msg = {text, sub, t}; }
+function drawMsg(){
+  if(!msg) return;
+  const a = Math.min(1, msg.t*2);
+  bctx.globalAlpha = a;
+  bctx.fillStyle="rgba(0,0,0,0.55)";
+  const w = Math.max(msg.text.length, (msg.sub||"").length)*4.4+16;
+  bctx.fillRect(VW/2-w/2, 128, w, msg.sub?26:16);
+  bctx.globalAlpha = 1;
+  T(msg.text, VW/2, 138, 7, "#fff", "center", a);
+  if(msg.sub) T(msg.sub, VW/2, 148, 6, "#c9c9d4", "center", a);
+}
+
+/* ---------- update: act 1 ---------- */
+function updateAct1(dt){
+  const p = player;
+  const buzzed = p.buzz>0;
+  const withdrawing = p.elixir<=0;
+  const power = Math.min(p.potionsDrunk, 16);           // the fantasy stacks
+  if(p.grab>0) p.grab -= dt;
+  const speed = (78 + power*4) * (buzzed?1.3:1) * (withdrawing?0.5:1) * (p.grab>0?0.45:1);
+
+  if(L()){ p.vx=-speed; p.face=-1; }
+  else if(R()){ p.vx=speed; p.face=1; }
+  else p.vx=0;
+
+  if(JUMP() && p.onGround){ p.vy = withdrawing? -150 : -(195+power*4); p.onGround=false; sfx("jump"); }
+  const wasAir = !p.onGround;
+  p.vy += 520*dt;
+  p.x += p.vx*dt; p.y += p.vy*dt;
+  p.x = Math.max(14, Math.min(W1-8, p.x));
+  if(p.y>=GROUND){
+    p.y=GROUND; p.vy=0; p.onGround=true;
+    if(wasAir){ puff(p.x, p.y, C(30,15,55), 5, 26); sfx("land"); }
+  }
+  if(p.vx!==0 && p.onGround) p.frame++;
+
+  // walls — the level demands potions
+  if(wallHintCd>0) wallHintCd-=dt;
+  for(const w of walls){
+    if(w.broken) continue;
+    if(p.x > w.x-11 && p.x < w.x+15){
+      p.x = (p.x < w.x+2)? w.x-11 : w.x+15;
+    }
+  }
+
+  // darkness hint
+  if(!darkHinted && p.x>DARK.a-30 && p.x<DARK.b && !buzzed){
+    darkHinted = true;
+    say("Too dark to see the path.","The bottles on the road are glowing. Or feel your way through.",3.8);
+  }
+
+  // attack
+  if(p.atkCd>0) p.atkCd-=dt;
+  if(p.atk>0) p.atk-=dt;
+  if(ATK() && p.atkCd<=0){ p.atk=0.14; p.atkCd=0.3; sfx("punch"); }
+
+  // breaking walls (only while buzzed)
+  if(p.atk>0.06) for(const w of walls){
+    if(w.broken) continue;
+    if(Math.abs((p.x+p.face*12)-w.x)<16){
+      if(buzzed){
+        w.broken = true; shake=0.25; sfx("break");
+        puff(w.x, GROUND-20, C(30,30,45), 16, 80);
+      } else if(wallHintCd<=0){
+        // the sober way through: slower, harder, real
+        wallHintCd = 0.45; w.hp--; shake=0.07; sfx("no");
+        puff(w.x, GROUND-26, C(30,20,42), 3, 30);
+        if(w.hp===9) say("It barely gives.","But it gives.",2.4);
+        if(w.hp<=0){
+          w.broken = true; shake=0.25; sfx("break");
+          puff(w.x, GROUND-20, C(30,30,45), 16, 80);
+          say("Slower. Harder.","But it broke all the same.",2.6);
+        }
+      }
+    }
+  }
+
+  // elixir economy — THE mechanic
+  const drain = 3.2 + p.tol*1.35;
+  p.elixir = Math.max(0, p.elixir - drain*dt);
+  if(p.buzz>0) p.buzz-=dt;
+  if(withdrawing){
+    p.hp = Math.max(0, p.hp - 4.5*dt);
+    if(Math.random()<dt*0.5) say("You need another one.","",1.6);
+  }
+  // the heartbeat of the craving
+  hbT -= dt;
+  if(p.elixir<25 && hbT<=0){
+    hbT = withdrawing? 0.7 : 1.05;
+    sfx("heart"); pulseV = 0.35;
+  }
+
+  // potions
+  for(const pot of potions){
+    if(pot.taken) continue;
+    pot.t += dt;
+    if(!pot.taken && !pot.counted && p.x > pot.x+12){   // you can walk past. it counts.
+      pot.counted = true; p.avoided++;
+      if(p.avoided===1) say("You walked past it.","",2.2);
+    }
+    if(Math.abs(pot.x-p.x)<8 && Math.abs((pot.y)-(p.y-12))<9){
+      pot.taken = true;
+      p.potionsDrunk++; p.tol++;
+      p.elixir = Math.min(100, p.elixir+55);
+      p.hp = Math.min(100, p.hp+12);
+      p.buzz = 3; flashT = 0.14;
+      p.checkpoint = p.x;
+      puff(pot.x, pot.y, C(285,90,70), 10, 60);
+      shake = 0.12; sfx("potion");
+      // the only narrator is the inner voice, and it lies more as it goes
+      const lines = ["Warmth.","Everything is fine now.","You feel strong. You ARE strong.",
+                     "You can stop whenever you want.","They keep getting in your way.","It works. It always works."];
+      say(lines[Math.min(lines.length-1, Math.floor(p.potionsDrunk/3))],"",1.8);
+    }
+  }
+
+  // the buzzsaw — enemies spawn faster the deeper (and more potioned) you are
+  spawnT -= dt;
+  const alive = mobs.reduce((n,m)=>n+(!m.dead?1:0),0);
+  if(p.potionsDrunk>0 && spawnT<=0 && alive<7){   // sober, no one is coming after you. no one ever was.
+    spawnT = Math.max(0.7, 3.0 - p.x/1100 - power*0.09);
+    const ahead = Math.random()<0.65;
+    const mx = Math.max(90, Math.min(W1-70, cam + (ahead? VW+18 : -18)));
+    mobs.push({x:mx, y:GROUND, hp:2+(power/4|0), dir:-1, t:Math.random()*6.28,
+               hurt:0, lunge:0, dead:false, deadT:0, generic:true});
+  }
+  // final surge before the light
+  if(!surge && p.potionsDrunk>0 && p.x > GOAL_X-320){
+    surge = true;
+    for(let i=0;i<6;i++) mobs.push({x:Math.min(W1-70,p.x+110+i*42), y:GROUND, hp:2+(power/4|0),
+      dir:-1, t:i, hurt:0, lunge:0, dead:false, deadT:0, generic:true});
+  }
+
+  // enemies (named + swarm)
+  const dmg = 1 + (power/3|0);
+  const foes = enemies.concat(mobs);
+  for(const e of foes){
+    if(e.dead){ e.deadT+=dt; continue; }
+    e.t += dt;
+    if(e.hurt>0) e.hurt-=dt;
+    const d = p.x - e.x;
+    const hostile = e.generic || e.id===5;   // only strangers — and YOU — ever hurt you
+    const clearEyed = !e.generic && e.id!==5 && p.potionsDrunk===0;  // sober, you see them plainly. they just stand there.
+    // getting past without hurting them counts. they notice.
+    if(!e.generic && !e.dead && !e.spared && p.x > e.x + 90){
+      e.spared = true;
+      if(e.grabbedOnce) say("It let you go.","It watched you leave.",2.4);
+    }
+    if(!clearEyed && !e.spared && Math.abs(d)<130){
+      e.dir = d>0?1:-1;
+      if(Math.abs(d)>14) e.x += e.dir * (hostile? 26+power*1.4 : 18) * dt;
+      else if(e.lunge<=0 && p.hurt<=0){
+        if(hostile){ // strike
+          p.hp = Math.max(0, p.hp-7); p.hurt=0.7; shake=0.18; sfx("hurt");
+          p.vx = e.dir*120; puff(p.x,p.y-18,C(0,80,55),6,50);
+          e.lunge = 1.15;
+        } else {     // family never strikes. they just hold on.
+          p.grab = 0.7; e.lunge = 0.9;
+          if(!e.grabbedOnce){ e.grabbedOnce = true; sfx("no");
+            say("It's holding on to you.","",2.2); }
+        }
+      }
+    }
+    if(e.lunge>0) e.lunge-=dt;
+    // take hit
+    if(p.atk>0.06){
+      const hx = p.x + p.face*12;
+      if(Math.abs(hx-e.x)<12+power && Math.abs(p.y-e.y)<24 && e.hurt<=0){
+        e.hp-=dmg; e.hurt=0.25; e.x += p.face*(10+power*2); shake=Math.min(0.22, 0.08+power*0.012);
+        puff(e.x,e.y-20,"#dcdcec",5+dmg,55);
+        if(e.hp<=0){
+          e.dead=true; puff(e.x,e.y-16,"#8a8aa0",14+power,80); sfx("kill");
+          if(e.generic){
+            p.kills.push(Math.max(70,Math.min(W1-80, e.x + (Math.random()*12-6))));
+            if(Math.random()<0.5)   // they drop what you need
+              potions.push({x:e.x, y:GROUND-12, taken:false, t:Math.random()*6.28});
+          }
+        }
+      }
+    }
+  }
+  mobs = mobs.filter(m=>!m.dead || m.deadT<0.7);
+  if(p.hurt>0) p.hurt-=dt;
+
+  // death → wake at checkpoint (the loop doesn't let you off that easy)
+  if(p.hp<=0){
+    p.hp=50; p.elixir=35; p.x=p.checkpoint; p.hurt=1;
+    say("You wake up.","First thought: potion.",3);
+  }
+
+  // goal
+  if(p.x >= GOAL_X-10){
+    state="turn"; turnIdx=0;
+    turnLines = [
+      "You made it.",
+      "The light you chased the whole way...",
+      "...is just a light.",
+      "There are no potions here.",
+      "There are no potions anywhere, anymore.",
+      "The only way out is back the way you came.",
+      "[ walk home ]"
+    ];
+  }
+
+  // saturation follows the buzz
+  const target = buzzed? 1.15 : withdrawing? 0.35 : 0.9;
+  SAT += (target-SAT)*dt*3;
+}
+
+/* ---------- update: act 2 ---------- */
+function updateAct2(dt){
+  const p = player;
+  const speed = 40; // half of you is missing
+  if(revealHold>0){ revealHold-=dt; p.vx=0; }   // you stop. you look at them.
+  else if(L()){ p.vx=-speed; p.face=-1; }
+  else if(R()){ p.vx=speed*0.7; p.face=1; }
+  else p.vx=0;
+  if(JUMP() && p.onGround){ p.vy=-145; p.onGround=false; sfx("jump"); }  // enough to clear a bottle. barely.
+  if(ATK()) say("You don't have the strength to fight.","And there's nothing left to fight.",2);
+  p.vy += 520*dt;
+  p.x += p.vx*dt; p.y += p.vy*dt;
+  p.x = Math.max(HOME_X-4, Math.min(W1-8, p.x));
+  if(p.y>=GROUND){ p.y=GROUND; p.vy=0; p.onGround=true; }
+  if(p.vx!==0 && p.onGround) p.frame++;
+
+  // hp decays but cannot kill you here — you survive this part. that's the point.
+  p.hp = Math.max(8, p.hp - 1.2*dt);
+
+  // loved ones reveal
+  LOVED.forEach((lo,i)=>{
+    if(!act2Spoken[i] && Math.abs(p.x-lo.x)<26){
+      act2Spoken[i]=true;
+      revealHold = 1.3;
+      p.face = lo.x>p.x? 1 : -1;
+      const line = player.potionsDrunk===0 ? "Walked beside you the whole way."
+                 : enemies[i].dead ? lo.line : lo.spared;
+      say(lo.name, line, 4.5);
+    }
+  });
+
+  // temptations on the way back — jumpable, passable, refusable
+  for(const ap of a2pots){
+    ap.t += dt;
+    if(!ap.taken && Math.abs(ap.x-p.x)<7 && Math.abs((GROUND-12)-(p.y-12))<8){
+      ap.taken = true; takeOne();
+      puff(ap.x, GROUND-12, C(285,90,70), 10, 60);
+    } else if(!ap.taken && !ap.counted && p.x < ap.x-14){
+      ap.counted = true; resisted++;
+    }
+  }
+  // one rolls out of the rubble you made
+  if(!popDone && p.x < walls[1].x+22 && p.x > walls[1].x-6){
+    popDone = true;
+    a2pots.push({x:walls[1].x-46, taken:false, counted:false, t:0});
+    say("One rolls out of the rubble.","",2.4);
+  }
+  // outside the bar, someone means well. keep walking.
+  if(!barOffer.resolved && Math.abs(p.x - LANDMARKS[3].x)<16){
+    if(Math.abs(p.vx)<2 && revealHold<=0){
+      barOffer.t += dt;
+      if(barOffer.t>1.0 && !barOffer.warned){
+        barOffer.warned = true;
+        say("He offers you one. He means well.","Keep walking.",3);
+      }
+      if(barOffer.t>3.4){
+        barOffer.resolved = true; takeOne();
+        say("It's easier when someone hands it to you.","",3);
+      }
+    }
+  } else if(!barOffer.resolved && p.x < LANDMARKS[3].x-24){
+    barOffer.resolved = true; resisted++;
+  }
+  if(buzz2>0) buzz2 -= dt;
+
+  if(p.x <= HOME_X+12){ state="end"; endT=0; fade=0; }
+
+  const t2 = buzz2>0 ? 1.05 : 0.16;
+  SAT += (t2-SAT)*dt*(buzz2>0? 8 : 2);
+}
+
+/* ---------- render world ---------- */
+function drawWalls(){
+  for(const w of walls){
+    const wx = w.x - cam; if(wx<-20||wx>VW+20) continue;
+    if(!w.broken && state==="act1"){
+      // standing wall, cracked
+      rect(wx-2, GROUND-38, 12, 38, C(28,25,38));
+      for(let r=0;r<6;r++) rect(wx-1+(r%2)*5, GROUND-35+r*6, 5, 2, C(28,20,30));
+      rect(wx+2, GROUND-26, 1, 12, C(28,15,18)); // crack
+      for(let d=0; d<(10-(w.hp??10)); d++)       // sober damage shows
+        rect(wx + (d*3)%10 - 1, GROUND-34+(d*7)%28, 1, 3+(d%2)*2, C(28,15,15));
+    } else {
+      // rubble — you walk over the damage you did
+      rect(wx-8, GROUND-4, 7, 4, C(28,20,32));
+      rect(wx+1, GROUND-3, 6, 3, C(28,18,28));
+      rect(wx-3, GROUND-6, 5, 3, C(28,22,36));
+    }
+  }
+}
+function drawDarkness(){
+  if(state!=="act1" && state!=="act2") return;
+  const p = player;
+  const edge = 60;
+  let t = 0;
+  if(p.x > DARK.a-edge && p.x < DARK.b+edge){
+    const inA = Math.min(1,(p.x-(DARK.a-edge))/edge);
+    const inB = Math.min(1,((DARK.b+edge)-p.x)/edge);
+    t = Math.min(inA, inB, 1);
+  }
+  if(t<=0) return;
+  const buzzed = state==="act1" && player.buzz>0;
+  const amt = state==="act2" ? 0.45 : (buzzed? 0.12 : 0.72);
+  bctx.fillStyle = `rgba(4,4,14,${amt*t})`;
+  bctx.fillRect(0,0,VW,VH);
+  // layered halo around the player so it's dark, not broken
+  if(!buzzed && t>0.3){
+    for(let i=3;i>0;i--){
+      bctx.fillStyle = `rgba(205,200,228,${0.022*i})`;
+      bctx.fillRect((p.x-cam-8*i-4)|0, p.y-24-6*i, 16*i+8, 30+10*i);
+    }
+  }
+}
+
+function renderWorld(){
+  drawBG();
+  drawHome();
+  if(state!=="act2") drawGoal();
+  drawWalls();
+
+  // potions
+  if(state==="act1") for(const pot of potions){
+    if(pot.taken) continue;
+    const px = pot.x-cam; if(px<-10||px>VW+10) continue;
+    const bob = Math.sin(pot.t*3)*2;
+    // layered glow + twinkle
+    bctx.fillStyle=`hsla(285,${85*SAT}%,65%,0.10)`;
+    bctx.fillRect(px-9, pot.y-10+bob, 20, 20);
+    bctx.fillStyle=`hsla(285,${85*SAT}%,65%,0.22)`;
+    bctx.fillRect(px-5, pot.y-6+bob, 12, 12);
+    if(((pot.t*4)|0)%3===0) rect(px+4, pot.y-8+bob, 1, 1, "#fff");
+    rect(px-2, pot.y-4+bob, 5, 7, C(285,85,62));
+    rect(px-1, pot.y-7+bob, 3, 3, C(285,60,40));
+    rect(px-1, pot.y-2+bob, 2, 2, C(300,95,80));
+  }
+
+  // temptations in act 2 — full color in a gray world
+  if(state==="act2"){
+    for(const ap of a2pots){
+      if(ap.taken) continue;
+      const px = ap.x-cam;
+      if(px<-10 || px>VW+10) continue;
+      const bob = Math.sin(ap.t*3)*2;
+      SAT_push(1);
+      bctx.fillStyle="hsla(285,85%,65%,0.3)";
+      bctx.fillRect(px-5, GROUND-18+bob, 12, 12);
+      rect(px-2, GROUND-16+bob, 5, 7, "hsl(285,85%,62%)");
+      rect(px-1, GROUND-19+bob, 3, 3, "hsl(285,60%,40%)");
+      rect(px-1, GROUND-14+bob, 2, 2, "hsl(300,95%,80%)");
+      SAT_pop();
+    }
+    // the man outside the bar
+    const bx = LANDMARKS[3].x - cam;
+    if(bx>-20 && bx<VW+20){
+      drawFigure(bx, GROUND, {skin:C(28,30,58), shirt:C(0,20,30), pants:C(230,10,20), hair:C(20,15,25),
+                              face: LANDMARKS[3].x>player.x? -1:1, frame:0, moving:false});
+      if(!barOffer.resolved){
+        SAT_push(1);
+        const hx = bx + (LANDMARKS[3].x>player.x? -9 : 7);
+        rect(hx, GROUND-18, 4, 6, "hsl(285,85%,62%)");
+        rect(hx+1, GROUND-20, 2, 2, "hsl(285,60%,40%)");
+        SAT_pop();
+      }
+    }
+  }
+
+  // enemies / loved ones
+  if(state==="act1"){
+    for(const e of enemies.concat(mobs)){
+      const ex = e.x-cam; if(ex<-30||ex>VW+30) continue;
+      const clearEyed = !e.generic && e.id!==5 && player.potionsDrunk===0;
+      if(!e.dead){
+        if(clearEyed) drawLovedOne(ex, e.y, e.id, false);   // no potions, no monsters
+        else drawShadowMonster(ex, e.y, e);
+      }
+      else if(e.deadT<0.6){ bctx.globalAlpha=1-e.deadT/0.6; drawShadowMonster(ex,e.y,e); bctx.globalAlpha=1; }
+    }
+  } else if(state==="act2"){
+    // everyone you went through is still here, watching you walk home
+    player.kills.forEach((kx,i)=>{
+      const ex = kx-cam; if(ex<-20||ex>VW+20) return;
+      const v = (i*37)%3;
+      drawFigure(ex, GROUND, {
+        skin: C(30,14,52+v*4), shirt: C(215+v*20,10,30+v*4),
+        pants: C(230,8,22), hair: C(25,10,20+v*6),
+        face: kx>player.x? -1:1, frame:0, moving:false
+      });
+      if(i%3===0 && Math.abs(kx-player.x)<18)
+        T(CROWD[(i/3|0)%CROWD.length], ex, GROUND-38, 5, "rgba(200,200,215,0.8)", "center");
+    });
+    // family stands closest to the road home
+    for(const e of enemies){
+      const ex = LOVED[e.id].x-cam; if(ex<-30||ex>VW+30) continue;
+      drawLovedOne(ex, GROUND, e.id, false);
+    }
+  }
+
+  // player
+  const p = player;
+  const flick = p.hurt>0 && (performance.now()/60|0)%2===0;
+  if(!flick){
+    const wd = state==="act2" || p.elixir<=0;
+    // euphoric aura
+    if(state==="act1" && p.buzz>0){
+      for(let i=3;i>0;i--){
+        bctx.fillStyle=`hsla(285,80%,70%,${0.045*i*Math.min(1,p.buzz)})`;
+        bctx.fillRect((p.x-cam-6*i-9)|0, p.y-34-4*i, 12*i+18, 38+8*i);
+      }
+    }
+    drawFigure(p.x-cam, p.y, {
+      skin: wd? C(30,25,60): C(30,50,68),
+      shirt: wd? C(215,20,35): C(215,70,45),
+      pants: C(230,25,25),
+      hair: C(25,40,25),
+      face:p.face, frame:p.frame, moving:p.vx!==0,
+      punch:p.atk>0
+    });
+    if(p.buzz>0){ // euphoria sparkle
+      bctx.fillStyle=`hsla(285,90%,75%,${0.5+Math.sin(performance.now()/80)*0.3})`;
+      bctx.fillRect((p.x-cam-6+Math.random()*12)|0,(p.y-36-Math.random()*6)|0,1,1);
+    }
+    if(p.atk>0 && state==="act1"){ // slash arc
+      const tt = 1-(p.atk/0.14);
+      bctx.fillStyle="rgba(255,255,255,0.85)";
+      const ax = p.x-cam+p.face*(11+tt*9);
+      bctx.fillRect(ax|0, (p.y-27+tt*11)|0, 3, 2);
+      bctx.fillRect((ax+p.face*3)|0, (p.y-23+tt*9)|0, 2, 2);
+      bctx.fillStyle="rgba(255,255,255,0.4)";
+      bctx.fillRect((ax-p.face*2)|0, (p.y-30+tt*12)|0, 2, 1);
+    }
+  }
+
+  // particles
+  particles = particles.filter(pt=>pt.t>0);
+  for(const pt of particles){
+    pt.t-=1/60; pt.x+=pt.vx/60; pt.y+=pt.vy/60; pt.vy+=2;
+    bctx.fillStyle=pt.col; bctx.fillRect(pt.x-cam|0, pt.y|0, 2, 2);
+  }
+
+  // ash drifts on the way back
+  if(state==="act2"){
+    const nw = performance.now()/1000;
+    bctx.fillStyle="rgba(200,200,212,0.22)";
+    for(let i=0;i<14;i++){
+      const ax = (((i*73 - nw*(5+(i%3)*2)) % (VW+20)) + VW+20) % (VW+20) - 10;
+      const ay = (i*47 + nw*(8+(i%4)*3)) % VH;
+      bctx.fillRect(ax|0, ay|0, 1, 1);
+    }
+  }
+
+  drawDarkness();
+
+  // withdrawal / craving vignette (pulses with the heartbeat)
+  const vgBase = (state==="act2" || (state==="act1"&&player.elixir<=0)) ? 0.28 : 0;
+  const vg = Math.min(0.5, vgBase + pulseV*0.5);
+  if(vg>0.01){
+    bctx.fillStyle=`rgba(10,10,25,${vg})`;
+    bctx.fillRect(0,0,VW,10); bctx.fillRect(0,VH-10,VW,10);
+    bctx.fillRect(0,0,10,VH); bctx.fillRect(VW-10,0,10,VH);
+  }
+}
+
+/* ---------- screens ---------- */
+function renderTitle(){
+  SAT=1; drawBG();
+  bctx.fillStyle="rgba(5,5,15,0.55)"; bctx.fillRect(0,0,VW,VH);
+  T("POTIONS", VW/2, 66, 22, C(285,85,70), "center", 1, true);
+  T("they say everything is better in the east.", VW/2, 82, 7, "#cfcfe0", "center");
+  if(day>1) T("DAY "+day, VW/2, 98, 8, "#c9a9e0", "center");
+  T("ARROWS / WASD move    SPACE jump    J attack    M mute", VW/2, 118, 6, "#9a9ab0", "center");
+  if((performance.now()/500|0)%2===0)
+    T("PRESS ENTER", VW/2, 140, 7, "#fff", "center");
+  if(CONFIRM()){ state="act1"; say("Get to the light in the east.","They say everything is better there.",4); }
+}
+
+function renderTurn(dt){
+  SAT += ((0.55 - turnIdx*0.06) - SAT)*dt*2;   // the color leaves as it sinks in
+  drawBG(); drawGoal();
+  drawFigure(player.x-cam, player.y, {skin:C(30,40,66),shirt:C(215,50,42),pants:C(230,25,25),hair:C(25,40,25),face:1,frame:0,moving:false});
+  bctx.fillStyle="rgba(5,5,12,0.6)"; bctx.fillRect(0,0,VW,VH);
+  T(turnLines[turnIdx], VW/2, VH/2, 8, "#e8e8f2", "center");
+  T("press J", VW/2, VH/2+18, 6, "#8a8a9c", "center");
+  if(CONFIRM()){
+    turnIdx++;
+    if(turnIdx>=turnLines.length){
+      state="act2"; player.face=-1; player.elixir=0; player.buzz=0;
+      say("The way back is longer.","It always is.",4);
+    }
+  }
+}
+
+function renderEnd(dt){
+  endT += dt;
+  const soberRun = player.potionsDrunk===0;
+  // clear-eyed, the color comes home with you
+  SAT = soberRun? Math.min(0.85, 0.16 + endT*0.12) : 0.16;
+  drawBG(); drawHome();
+  if(soberRun) for(let i=0;i<5;i++) drawLovedOne(HOME_X+34+i*17-cam, GROUND, i, false);
+  drawFigure(player.x-cam, GROUND, {skin:C(30,25,60),shirt:C(215,20,35),pants:C(230,25,25),hair:C(25,40,25),face:-1,frame:0,moving:false});
+  const a = Math.min(1, endT/3);
+  const sober = player.potionsDrunk===0;
+  bctx.fillStyle=`rgba(5,5,12,${a*(sober? 0.45 : 0.85)})`; bctx.fillRect(0,0,VW,VH);
+  const fought = player.kills.length + enemies.filter(e=>e.dead).length;
+  const sparedN = enemies.filter(e=>e.spared && !e.dead).length;
+  const lines = [
+    [2,  "#d8d8e4", 8,  "You made it back."],
+    [4.5,"#9a9aab", 7,  sober? "Clear-eyed. Empty-handed." : "Not fixed. Not fine."],
+    [6.5,"#9a9aab", 7,  sober? "They're all still here. They always were." : `Just back. That's day ${day}.`],
+    [9,  C(285,85,70), 16, "POTIONS"],
+    [10.5,"#8a8a9c",6, sober? "you never touched a single one" : `you drank ${player.potionsDrunk} potions on the way there`],
+    [11.5,"#8a8a9c",6, sober? "and no one ever stood in your way" : `you went through ${fought} people to get to the light`],
+    [12.4,"#9cc9a9",6, sparedN>0 && !sober? `${sparedN} of them you never touched. they remember.` : (player.avoided>0 && !sober? `you walked past ${player.avoided}` : "")],
+    [13.2,"#8a8a9c",6, tookOne? "and you took one on the way back. day one starts again."
+                       : (sober? "" : (resisted>0? `it found you ${resisted} times on the way back. you kept walking.` : "you needed zero on the way back"))],
+    [14.5,"#666677",6, "press ENTER to walk it again"],
+  ];
+  let yy = 52;
+  for(const [t,col,size,text] of lines){
+    if(endT>t && text) T(text, VW/2, yy, size, col, "center", 1, size>=16);
+    yy += size>=16? 22: 13;
+  }
+  if(endT>14.5 && CONFIRM()){
+    day = tookOne? 1 : day+1;
+    saveDay();
+    reset();
+  }
+}
+
+/* ---------- main loop ---------- */
+let last = performance.now();
+function frame(now){
+  const dt = Math.min(0.033, (now-last)/1000); last = now;
+
+  if(state==="act1") updateAct1(dt);
+  else if(state==="act2") updateAct2(dt);
+
+  // camera
+  if(state==="act1"||state==="act2"||state==="turn"){
+    const target = player.x - VW*0.45;
+    cam += (target-cam)*Math.min(1,dt*6);
+    cam = Math.max(0, Math.min(W1-VW, cam));
+  }
+  if(shake>0){ shake-=dt; }
+  flashT = Math.max(0, flashT-dt);
+  pulseV = Math.max(0, pulseV-dt*1.6);
+
+  // render
+  bctx.save();
+  if(shake>0) bctx.translate((Math.random()-0.5)*3|0,(Math.random()-0.5)*3|0);
+  if(state==="title") renderTitle();
+  else if(state==="turn") renderTurn(dt);
+  else if(state==="end") renderEnd(dt);
+  else renderWorld();
+  bctx.restore();
+  if(flashT>0){ bctx.fillStyle=`rgba(255,242,255,${Math.min(0.45,flashT*3)})`; bctx.fillRect(0,0,VW,VH); }
+
+  drawHUD();
+  if(msg){ msg.t-=dt; if(msg.t<=0) msg=null; }
+  drawMsg();
+
+  // no act labels — just a compass. the world does the telling.
+  if(state==="act1")      T("EAST →", VW-6, 12, 7, `hsla(46,${80*SAT}%,70%,0.75)`, "right");
+  else if(state==="act2") T("← home", VW-6, 12, 6, "rgba(180,180,195,0.55)", "right");
+
+  musicTick();
+  sctx.drawImage(buf, 0, 0, screen.width, screen.height);
+  flushText();
+  pressed = {};
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
 </html>
