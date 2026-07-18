@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+
+jobs:
+  html-check:
+    name: HTML + local links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Minimal safe check for this no-build, single-file project.
+      # Stdlib only — no build system, no test framework, no npm.
+      - name: Validate HTML structure and local links
+        run: |
+          python3 <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          root = Path(".")
+          errors = []
+
+          html_path = root / "index.html"
+          if not html_path.is_file():
+              errors.append("missing index.html")
+          else:
+              text = html_path.read_text(encoding="utf-8", errors="replace")
+              lower = text.lower()
+              if not lower.lstrip().startswith("<!doctype html"):
+                  errors.append("index.html: missing <!DOCTYPE html>")
+              for tag in ("<html", "<head", "<body", "<title"):
+                  if tag not in lower:
+                      errors.append(f"index.html: missing {tag}>")
+
+          # Local markdown links and backtick file refs that look like repo paths.
+          md_link = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+          for md in root.glob("*.md"):
+              content = md.read_text(encoding="utf-8", errors="replace")
+              for target in md_link.findall(content):
+                  target = target.strip()
+                  if target.startswith(("http://", "https://", "mailto:", "#")):
+                      continue
+                  path = (md.parent / target.split("#", 1)[0]).resolve()
+                  try:
+                      path.relative_to(root.resolve())
+                  except ValueError:
+                      errors.append(f"{md}: link escapes repo: {target}")
+                      continue
+                  if not path.exists():
+                      errors.append(f"{md}: broken local link: {target}")
+
+          if errors:
+              print("HTML / link check failed:")
+              for e in errors:
+                  print(f"  - {e}")
+              sys.exit(1)
+          print("OK: index.html structure + local markdown links")
+          PY
+
+  # DISABLED — placeholder for a future AI QC pass. Do not implement yet.
+  # TODO: wire fable-qc when the AI QC hook is ready.
+  fable-qc:
+    name: fable-qc
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "fable-qc placeholder — not implemented"

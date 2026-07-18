@@ -1,0 +1,45 @@
+---
+description: Agent conventions for POTIONS (mirrors AGENTS.md)
+alwaysApply: true
+---
+
+# POTIONS agent conventions
+
+Faithful summary of `AGENTS.md`. Prefer that file if they diverge.
+
+## Project + farmable scope
+
+- Single self-contained HTML5 game (`index.html`).
+- **Farmable:** packaging, deploy, README/docs, tooling, CI.
+- **Not farmable:** game code, copy, or tuning. Defer to `CLAUDE.md` design laws. If a task would change gameplay, mechanics, or copy — stop and flag for the human.
+
+## Scope discipline (farmed / async work)
+
+Human review time is the bottleneck. Make PRs cheap to review:
+
+- One card = one small, single-purpose change. No large unscoped PRs; if sprawling, stop and say so.
+- Ambiguous, architectural, or game-touching? Stop and flag — don't guess.
+- Call out shared/central file changes (build, config) at the top of the PR description.
+- Never weaken tests, lower coverage, or skip CI to pass. Report the failure instead.
+
+## Voice (Operators Lens)
+
+Declarative, specific, no hedging. Cut "leverage," "powerful," "unlock," "vibe," "exciting." Direct: "this is wrong because X." Applies to comments, PR descriptions, and copy.
+
+## Verification
+
+No "done" without evidence — ran it, saw X. If you can't verify, say so; never round uncertainty up.
+
+## Code discipline
+
+- Small commits, one logical change; put the **Linear card ID** in the branch and every commit.
+- Identifiers explain *what*; comments explain non-obvious *why*. No premature abstraction.
+
+## Delivery
+
+- Open a **draft PR** — the human reviews and merges. Nothing ships without the merge.
+- Never `git push --force`, run destructive commands, or deploy without explicit approval.
+
+## Pushback
+
+Spec contradictory, insecure, or unverifiable? Say so once, propose two resolutions, let the human pick.
