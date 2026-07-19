@@ -51,6 +51,19 @@ const JUMP = ()=>pressed["ArrowUp"]||pressed["w"]||pressed["W"]||pressed[" "]||p
 const ATK  = ()=>pressed["j"]||pressed["J"]||pressed["x"]||pressed["X"];
 const CONFIRM = ()=>pressed["Enter"]||pressed[" "]||pressed["j"]||pressed["J"];
 
+/* ---------- click / tap to start (title screen) ---------- */
+const START_BTN = { x: VW/2 - 30, y: 132, w: 60, h: 18 };
+let startClicked = false;
+screen.addEventListener("pointerdown", e=>{
+  if(state !== "title") return;
+  const r = screen.getBoundingClientRect();
+  const ix = (e.clientX - r.left) * (VW / r.width);
+  const iy = (e.clientY - r.top)  * (VH / r.height);
+  if(ix>=START_BTN.x && ix<=START_BTN.x+START_BTN.w && iy>=START_BTN.y && iy<=START_BTN.y+START_BTN.h){
+    e.preventDefault(); initAudio(); startClicked = true;
+  }
+});
+
 /* ---------- crisp text overlay (drawn at full screen res) ---------- */
 let TQ = [];
 function T(str,x,y,size,col,align="left",a=1,bold=false){ TQ.push({str,x,y,size,col,align,a,bold}); }
@@ -984,9 +997,13 @@ function renderTitle(){
   T("they say everything is better in the east.", VW/2, 82, 7, "#cfcfe0", "center");
   if(day>1) T("DAY "+day, VW/2, 98, 8, "#c9a9e0", "center");
   T("ARROWS / WASD move    SPACE jump    J attack    M mute", VW/2, 118, 6, "#9a9ab0", "center");
-  if((performance.now()/500|0)%2===0)
-    T("PRESS ENTER", VW/2, 140, 7, "#fff", "center");
-  if(CONFIRM()){ state="act1"; say("Get to the light in the east.","They say everything is better there.",4); }
+  // START button — click or press Enter
+  const b = START_BTN;
+  bctx.fillStyle="rgba(30,15,45,0.7)"; bctx.fillRect(b.x, b.y, b.w, b.h);
+  bctx.strokeStyle=C(285,80,65); bctx.lineWidth=1; bctx.strokeRect(b.x+0.5, b.y+0.5, b.w-1, b.h-1);
+  T("START", VW/2, b.y+12, 8, "#fff", "center");
+  T("click or press ENTER", VW/2, 158, 5, "#9a9ab0", "center");
+  if(CONFIRM() || startClicked){ startClicked=false; state="act1"; say("Get to the light in the east.","They say everything is better there.",4); }
 }
 
 function renderTurn(dt){
