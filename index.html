@@ -51,6 +51,34 @@ const JUMP = ()=>pressed["ArrowUp"]||pressed["w"]||pressed["W"]||pressed[" "]||p
 const ATK  = ()=>pressed["j"]||pressed["J"]||pressed["x"]||pressed["X"];
 const CONFIRM = ()=>pressed["Enter"]||pressed[" "]||pressed["j"]||pressed["J"];
 
+const TITLE_START = { x: VW/2-26, y: 150, w: 52, h: 16 };
+let titleStartHover = false;
+function gameCoords(e){
+  const r = screen.getBoundingClientRect();
+  return { x: (e.clientX-r.left)*(VW/r.width), y: (e.clientY-r.top)*(VH/r.height) };
+}
+function titleStartHit(gx, gy){
+  return gx>=TITLE_START.x && gx<=TITLE_START.x+TITLE_START.w
+    && gy>=TITLE_START.y && gy<=TITLE_START.y+TITLE_START.h;
+}
+function startFromTitle(){
+  state="act1";
+  say("Get to the light in the east.","They say everything is better there.",4);
+}
+screen.addEventListener("pointermove", e=>{
+  if(state!=="title"){ screen.style.cursor="default"; titleStartHover=false; return; }
+  const {x,y} = gameCoords(e);
+  titleStartHover = titleStartHit(x,y);
+  screen.style.cursor = titleStartHover? "pointer" : "default";
+});
+screen.addEventListener("pointerdown", e=>{
+  if(state!=="title") return;
+  initAudio();
+  const {x,y} = gameCoords(e);
+  if(titleStartHit(x,y)) startFromTitle();
+});
+screen.addEventListener("pointerleave", ()=>{ titleStartHover=false; screen.style.cursor="default"; });
+
 /* ---------- crisp text overlay (drawn at full screen res) ---------- */
 let TQ = [];
 function T(str,x,y,size,col,align="left",a=1,bold=false){ TQ.push({str,x,y,size,col,align,a,bold}); }
@@ -986,7 +1014,13 @@ function renderTitle(){
   T("ARROWS / WASD move    SPACE jump    J attack    M mute", VW/2, 118, 6, "#9a9ab0", "center");
   if((performance.now()/500|0)%2===0)
     T("PRESS ENTER", VW/2, 140, 7, "#fff", "center");
-  if(CONFIRM()){ state="act1"; say("Get to the light in the east.","They say everything is better there.",4); }
+  const b = TITLE_START;
+  bctx.fillStyle = titleStartHover? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.10)";
+  bctx.fillRect(b.x, b.y, b.w, b.h);
+  bctx.strokeStyle = titleStartHover? "#fff" : "rgba(255,255,255,0.85)";
+  bctx.strokeRect(b.x+0.5, b.y+0.5, b.w-1, b.h-1);
+  T("START", b.x+b.w/2, b.y+12, 7, "#fff", "center");
+  if(CONFIRM()) startFromTitle();
 }
 
 function renderTurn(dt){
