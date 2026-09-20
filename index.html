@@ -408,117 +408,83 @@ function SAT_push(v){ _satStack.push(SAT); SAT=v; }
 function SAT_pop(){ SAT=_satStack.pop(); }
 
 /* ---------- background ---------- */
-/* hard graphic block — ink underlayer + flat fill (SMB sketch Act I only) */
-function inkRect(x,y,w,h,fill,ink=2){
-  if(ink>0) rect(x-ink, y-ink, w+ink*2, h+ink*2, "#000");
-  rect(x, y, w, h, fill);
-}
 function drawBG(){
   const night = state==="act2";
-  const hard = smbAct1(); // Act I sketch only — never the walk home
-  if(hard){
-    // cut-paper sky: 4 hard value bands, no soft wash
-    const bands = [[205,55,58],[195,45,52],[55,40,48],[35,35,42]];
-    for(let i=0;i<4;i++){
-      const [h,s,l] = bands[i];
-      rect(0, i*28, VW, i===3? VH-i*28 : 28, C(h,s,l));
-    }
-    // horizon ink rule
-    rect(0, 108, VW, 2, "#000");
-    // sun: hard disc, no glow bloom
+  // sky gradient (banded, pixel style)
+  const skyTop = night? [230,20,10] : [205,70,62];
+  const skyBot = night? [235,15,22] : [28,85,72];
+  for(let i=0;i<12;i++){
+    const t=i/11;
+    const h=skyTop[0]+(skyBot[0]-skyTop[0])*t;
+    const s=skyTop[1]+(skyBot[1]-skyTop[1])*t;
+    const l=skyTop[2]+(skyBot[2]-skyTop[2])*t;
+    rect(0, i*15, VW, 15, C(h,s,l));
+  }
+  // sun with glow / cold moon
+  if(!night){
     const sx = 250-cam*0.05;
-    inkRect(sx, 20, 16, 16, C(48,95,72), 2);
-    rect(sx+3, 23, 4, 4, C(48,40,55)); // graphic notch, not soft highlight
-    // clouds as solid cut shapes with ink
-    for(let i=0;i<3;i++){
-      const cx = ((i*160 - cam*0.12) % (VW+90) + VW+90) % (VW+90) - 45;
-      inkRect(cx, 28+i*10, 48, 8, C(40,20,78), 1);
-      inkRect(cx+10, 22+i*10, 28, 8, C(40,20,82), 1);
-    }
-    // far hills — stacked silhouette slabs
-    for(let i=-1;i<8;i++){
-      const hx = i*200 - (cam*0.22)%200;
-      inkRect(hx, 100, 150, 50, C(150,50,22), 2);
-      inkRect(hx+40, 88, 80, 62, C(155,55,16), 2);
-    }
-    // mid trees — chunky paper cutouts
-    for(let i=-1;i<11;i++){
-      const tx = i*140 - (cam*0.55)%140;
-      inkRect(tx+22, 114, 5, 36, C(25,50,18), 1);
-      inkRect(tx+8, 94, 32, 24, C(120,50,24), 2);
-      inkRect(tx+14, 88, 20, 10, C(120,55,18), 1);
-    }
-    // ground: flat plane + bold ink lip (no soft speckles)
-    rect(0, GROUND, VW, VH-GROUND, C(95,45,20));
-    rect(0, GROUND-2, VW, 2, "#000");
-    rect(0, GROUND, VW, 4, C(95,35,14));
-    // sparse graphic path blocks — intentional, not painterly grit
-    for(let i=0;i<5;i++){
-      const sx = ((i*150 - cam) % (VW+80) + VW+80) % (VW+80) - 20;
-      inkRect(sx, GROUND+6, 14, 4, C(40,20,28), 1);
-    }
+    bctx.fillStyle=`hsla(45,${90*SAT}%,80%,0.25)`; bctx.fillRect(sx-6,18,26,26);
+    bctx.fillStyle=`hsla(45,${90*SAT}%,80%,0.18)`; bctx.fillRect(sx-12,12,38,38);
+    rect(sx, 24, 14, 14, C(45,95,75));
+    rect(sx+2, 26, 10, 10, C(48,100,85));
   } else {
-    // sky gradient (banded, pixel style)
-    const skyTop = night? [230,20,10] : [205,70,62];
-    const skyBot = night? [235,15,22] : [28,85,72];
-    for(let i=0;i<12;i++){
-      const t=i/11;
-      const h=skyTop[0]+(skyBot[0]-skyTop[0])*t;
-      const s=skyTop[1]+(skyBot[1]-skyTop[1])*t;
-      const l=skyTop[2]+(skyBot[2]-skyTop[2])*t;
-      rect(0, i*15, VW, 15, C(h,s,l));
-    }
-    // sun with glow / cold moon
+    const mx = 60-cam*0.05;
+    bctx.fillStyle="rgba(200,205,225,0.08)"; bctx.fillRect(mx-6,14,22,22);
+    rect(mx, 20, 10, 10, C(220,20,80));
+    rect(mx+2, 22, 3, 3, C(220,15,62));
+  }
+  // clouds / low fog
+  for(let i=0;i<4;i++){
+    const cx = ((i*137 - cam*0.15) % (VW+80) + VW+80) % (VW+80) - 40;
     if(!night){
-      const sx = 250-cam*0.05;
-      bctx.fillStyle=`hsla(45,${90*SAT}%,80%,0.25)`; bctx.fillRect(sx-6,18,26,26);
-      bctx.fillStyle=`hsla(45,${90*SAT}%,80%,0.18)`; bctx.fillRect(sx-12,12,38,38);
-      rect(sx, 24, 14, 14, C(45,95,75));
-      rect(sx+2, 26, 10, 10, C(48,100,85));
+      bctx.fillStyle=`hsla(30,${35*SAT}%,88%,0.45)`;
+      bctx.fillRect(cx, 22+i*13, 44, 6);
+      bctx.fillRect(cx+9, 18+i*13, 26, 4);
     } else {
-      const mx = 60-cam*0.05;
-      bctx.fillStyle="rgba(200,205,225,0.08)"; bctx.fillRect(mx-6,14,22,22);
-      rect(mx, 20, 10, 10, C(220,20,80));
-      rect(mx+2, 22, 3, 3, C(220,15,62));
+      bctx.fillStyle="rgba(160,160,180,0.08)";
+      bctx.fillRect(cx-24, 96+i*16, 110, 7);
     }
-    // clouds / low fog
-    for(let i=0;i<4;i++){
-      const cx = ((i*137 - cam*0.15) % (VW+80) + VW+80) % (VW+80) - 40;
-      if(!night){
-        bctx.fillStyle=`hsla(30,${35*SAT}%,88%,0.45)`;
-        bctx.fillRect(cx, 22+i*13, 44, 6);
-        bctx.fillRect(cx+9, 18+i*13, 26, 4);
-      } else {
-        bctx.fillStyle="rgba(160,160,180,0.08)";
-        bctx.fillRect(cx-24, 96+i*16, 110, 7);
-      }
+  }
+  // far hills
+  for(let i=-1;i<9;i++){
+    const hx = i*180 - (cam*0.25)%180;
+    rect(hx, 96, 130, 60, night? C(240,18,20): C(150,45,30));
+    rect(hx+30, 84, 70, 70, night? C(245,16,16): C(155,50,24));
+    // subtle underside shade only in Act I sketch — soft, not ink slabs
+    if(smbAct1()){
+      bctx.fillStyle="rgba(0,0,0,0.12)";
+      bctx.fillRect(hx|0, 140, 130, 16);
+      bctx.fillRect((hx+30)|0, 138, 70, 16);
     }
-    // far hills
-    for(let i=-1;i<9;i++){
-      const hx = i*180 - (cam*0.25)%180;
-      rect(hx, 96, 130, 60, night? C(240,18,20): C(150,45,30));
-      rect(hx+30, 84, 70, 70, night? C(245,16,16): C(155,50,24));
+  }
+  // mid trees
+  for(let i=-1;i<12;i++){
+    const tx = i*130 - (cam*0.6)%130;
+    rect(tx+20, 112, 6, 38, night? C(250,12,14): C(25,45,25));
+    rect(tx+10, 96, 26, 22, night? C(250,14,18): C(115,45,28));
+    if(smbAct1()){
+      bctx.fillStyle="rgba(0,0,0,0.10)";
+      bctx.fillRect((tx+10)|0, 112, 26, 6);
     }
-    // mid trees
-    for(let i=-1;i<12;i++){
-      const tx = i*130 - (cam*0.6)%130;
-      rect(tx+20, 112, 6, 38, night? C(250,12,14): C(25,45,25));
-      rect(tx+10, 96, 26, 22, night? C(250,14,18): C(115,45,28));
-    }
-    // ground
-    rect(0, GROUND, VW, VH-GROUND, night? C(245,14,17): C(95,40,26));
-    rect(0, GROUND, VW, 3, night? C(245,12,26): C(95,45,38));
-    // ground detail: grass lip, path stones, speckle
-    rect(0, GROUND+3, VW, 1, night? C(245,10,12): C(95,40,20));
-    for(let i=0;i<14;i++){
-      const gx = (i*61 - cam)%(VW+60);
-      rect(gx, GROUND+8+(i%3)*6, 5, 2, night? C(245,10,12): C(95,35,20));
-    }
-    for(let i=0;i<7;i++){
-      const sx = ((i*127 - cam) % (VW+60) + VW+60) % (VW+60) - 20;
-      rect(sx, GROUND+3, 9, 3, night? C(245,8,21): C(40,25,34));
-      rect(sx+2, GROUND+3, 5, 1, night? C(245,8,26): C(40,25,42));
-    }
+  }
+  // ground
+  rect(0, GROUND, VW, VH-GROUND, night? C(245,14,17): C(95,40,26));
+  rect(0, GROUND, VW, 3, night? C(245,12,26): C(95,45,38));
+  // ground detail: grass lip, path stones, speckle
+  rect(0, GROUND+3, VW, 1, night? C(245,10,12): C(95,40,20));
+  if(smbAct1()){
+    // soft ground wash — a little depth, still the old style
+    bctx.fillStyle="rgba(0,0,0,0.08)";
+    bctx.fillRect(0, GROUND+4, VW, 18);
+  }
+  for(let i=0;i<14;i++){
+    const gx = (i*61 - cam)%(VW+60);
+    rect(gx, GROUND+8+(i%3)*6, 5, 2, night? C(245,10,12): C(95,35,20));
+  }
+  for(let i=0;i<7;i++){
+    const sx = ((i*127 - cam) % (VW+60) + VW+60) % (VW+60) - 20;
+    rect(sx, GROUND+3, 9, 3, night? C(245,8,21): C(40,25,34));
+    rect(sx+2, GROUND+3, 5, 1, night? C(245,8,26): C(40,25,42));
   }
   drawLandmarks();
 }
@@ -532,53 +498,35 @@ const LANDMARKS = [
 ];
 function drawLandmarks(){
   const real = state==="act2";
-  const hard = smbAct1(); // graphic inked fantasy — Act I sketch only
   for(let i=0;i<LANDMARKS.length;i++){
     const lm = LANDMARKS[i];
     const x = (lm.x - cam)|0;
     if(x<-90||x>VW+90) continue;
     if(!real){
-      if(hard){
-        if(i===0){ // castle keep — cut-paper slabs
-          inkRect(x-30,GROUND-56,60,56,C(260,30,24), 2);
-          for(let b=0;b<5;b++) inkRect(x-30+b*13,GROUND-64,8,8,C(260,30,20), 1);
-          inkRect(x-5,GROUND-80,5,24,C(260,25,18), 1);
-          inkRect(x,GROUND-80,12,7,C(350,80,48), 1);
-          inkRect(x-10,GROUND-30,10,14,C(260,20,14), 1);
-          inkRect(x+10,GROUND-42,7,7,C(55,70,55), 1);
-        } else if(i===1){ // twin spires
-          inkRect(x-28,GROUND-72,18,72,C(250,30,22), 2);
-          inkRect(x+10,GROUND-88,18,88,C(250,30,18), 2);
-          inkRect(x-32,GROUND-80,26,9,C(250,35,28), 1);
-          inkRect(x+6,GROUND-96,26,9,C(250,35,24), 1);
-          inkRect(x-22,GROUND-52,7,7,C(55,70,50), 1);
-          inkRect(x+16,GROUND-62,7,7,C(55,70,50), 1);
-        } else if(i===2){ // dark tower
-          inkRect(x-18,GROUND-98,36,98,C(240,25,14), 2);
-          for(let wy=0;wy<5;wy++) inkRect(x-8,GROUND-90+wy*16,5,6,C(55,80,52), 1);
-          inkRect(x-22,GROUND-104,44,8,C(240,25,10), 1);
-        } else { // the den — flat glow block, no soft bloom
-          inkRect(x-28,GROUND-42,56,42,C(280,35,18), 2);
-          inkRect(x-10,GROUND-28,20,28,C(285,85,48), 1);
-          inkRect(x-14,GROUND-34,28,6,C(285,60,35), 1);
-        }
-      } else if(i===0){ // castle keep
+      if(i===0){ // castle keep
         rect(x-30,GROUND-56,60,56,C(260,25,30));
         for(let b=0;b<5;b++) rect(x-30+b*13,GROUND-62,7,6,C(260,25,30));
         rect(x-4,GROUND-78,4,22,C(260,20,24)); rect(x,GROUND-78,10,6,C(350,70,50));
         rect(x-8,GROUND-30,8,12,C(260,20,18)); rect(x+8,GROUND-40,6,6,C(55,80,65));
+        if(smbAct1()){ bctx.fillStyle="rgba(0,0,0,0.12)"; bctx.fillRect(x-30,GROUND-12,60,12); }
       } else if(i===1){ // twin spires
         rect(x-26,GROUND-70,16,70,C(250,25,28)); rect(x+10,GROUND-84,16,84,C(250,25,24));
         rect(x-30,GROUND-78,24,8,C(250,25,32)); rect(x+6,GROUND-92,24,8,C(250,25,28));
         rect(x-22,GROUND-50,6,6,C(55,80,60)); rect(x+14,GROUND-60,6,6,C(55,80,60));
+        if(smbAct1()){
+          bctx.fillStyle="rgba(0,0,0,0.12)";
+          bctx.fillRect(x-26,GROUND-14,16,14); bctx.fillRect(x+10,GROUND-14,16,14);
+        }
       } else if(i===2){ // dark tower
         rect(x-16,GROUND-95,32,95,C(240,20,18));
         for(let wy=0;wy<6;wy++) rect(x-8,GROUND-88+wy*14,4,5,C(55,90,60));
         rect(x-20,GROUND-100,40,7,C(240,20,14));
+        if(smbAct1()){ bctx.fillStyle="rgba(0,0,0,0.12)"; bctx.fillRect(x-16,GROUND-16,32,16); }
       } else { // the glowing den
         rect(x-28,GROUND-40,56,40,C(280,30,22));
         rect(x-10,GROUND-26,20,26,C(285,70,45));
         bctx.fillStyle=`hsla(285,${70*SAT}%,60%,0.25)`; bctx.fillRect(x-16,GROUND-32,32,32);
+        if(smbAct1()){ bctx.fillStyle="rgba(0,0,0,0.10)"; bctx.fillRect(x-28,GROUND-10,56,10); }
       }
     } else {
       if(i===0){ // school
@@ -608,21 +556,14 @@ function drawLandmarks(){
 function drawGoal(){
   const gx = GOAL_X - cam;
   if(gx<-40||gx>VW+40) return;
-  if(smbAct1()){
-    // hard beacon — stacked inked bars, no soft bloom
-    inkRect(gx-10, GROUND-54, 26, 54, C(46,85,52), 2);
-    inkRect(gx-6, GROUND-46, 18, 46, C(48,95,68), 1);
-    inkRect(gx-2, GROUND-58, 10, 6, C(48,80,78), 1);
-  } else {
-    const pulse = Math.sin(performance.now()/300)*6;
-    // radiant light
-    for(let i=4;i>0;i--){
-      bctx.fillStyle = `hsla(48,${90*SAT}%,${60+i*6}%,${0.10*i})`;
-      bctx.fillRect(gx-10-i*6-pulse/2, GROUND-60-i*8, 34+i*12+pulse, 60+i*8);
-    }
-    rect(gx-8, GROUND-52, 22, 52, C(46,90,60));
-    rect(gx-4, GROUND-44, 14, 44, C(48,100,78));
+  const pulse = Math.sin(performance.now()/300)*6;
+  // radiant light
+  for(let i=4;i>0;i--){
+    bctx.fillStyle = `hsla(48,${90*SAT}%,${60+i*6}%,${0.10*i})`;
+    bctx.fillRect(gx-10-i*6-pulse/2, GROUND-60-i*8, 34+i*12+pulse, 60+i*8);
   }
+  rect(gx-8, GROUND-52, 22, 52, C(46,90,60));
+  rect(gx-4, GROUND-44, 14, 44, C(48,100,78));
 }
 function drawHome(){
   const hx = HOME_X - cam;
