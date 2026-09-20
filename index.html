@@ -42,6 +42,11 @@ addEventListener("keydown", e=>{
   keys[e.key] = true;
   initAudio();
   if(e.key==="m"||e.key==="M") musicOn = !musicOn;
+  // experimental Act I art fork — chunky high-contrast sketch (off by default)
+  if(e.key==="v"||e.key==="V"){
+    smbSketch = !smbSketch;
+    try{ localStorage.setItem("potions_smb_sketch", smbSketch? "1":"0"); }catch(err){}
+  }
 });
 addEventListener("keyup", e=>{ keys[e.key] = false; });
 let pressed = {};
@@ -193,6 +198,14 @@ let msg = null;                          // {text, sub, t}
 let shake = 0, fade = 0, fadeDir = 0;
 let turnLines, turnIdx, endT, act2Spoken;
 let walls, a2pots, barOffer, popDone, resisted, tookOne, buzz2, darkHinted, wallHintCd;
+/* Experimental side fork: Super Meat Boy–leaning silhouettes for Act I player + generic mobs.
+   Off by default. Toggle with V, or open with ?smb / #smb. Loved ones + Act II stay soft/gray. */
+let smbSketch = false;
+try{
+  smbSketch = localStorage.getItem("potions_smb_sketch")==="1"
+    || /(?:\?|&|#)smb\b/i.test(location.href);
+}catch(e){}
+function smbAct1(){ return smbSketch && state==="act1"; }
 function takeOne(){ tookOne = true; buzz2 = 3; flashT = 0.14; sfx("potion"); }
 let mobs, spawnT, surge;                 // the buzzsaw
 let hbT=0, pulseV=0, flashT=0, revealHold=0;   // heartbeat / juice / act2 pauses
@@ -225,7 +238,8 @@ const DARK  = {a:1150, b:1520};          // only see while buzzed
 function reset(){
   player = { x:60, y:GROUND, vx:0, vy:0, face:1, onGround:true,
              hp:100, elixir:70, tol:0, buzz:0, atk:0, atkCd:0, hurt:0,
-             potionsDrunk:0, frame:0, dead:0, checkpoint:60, kills:[], grab:0, avoided:0 };
+             potionsDrunk:0, frame:0, dead:0, checkpoint:60, kills:[], grab:0, avoided:0,
+             landSquash:0 };
   mobs = []; spawnT = 2.5; surge = false;
   hbT = 0; pulseV = 0; flashT = 0; revealHold = 0;
   enemies = makeEnemies();
@@ -308,25 +322,67 @@ function drawSprite(rows, x, y, pal, flip, s=2){
     }
   }
 }
+/* hard black halo under a sprite — Meat Boy–adjacent chunk, not a new body */
+function drawSpriteOutline(rows, x, y, flip, s=2){
+  const ink = { o:"#000", h:"#000", s:"#000", c:"#000", p:"#000", b:"#000", e:"#000" };
+  for(const [dx,dy] of [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]])
+    drawSprite(rows, x+dx, y+dy, ink, flip, s);
+}
+function smbSquashScale(opt){
+  let sx = 1, sy = 1;
+  if(opt.air){ sx = 0.86; sy = 1.16; }
+  else if((opt.landSquash||0)>0){ sx = 1.18; sy = 0.82; }
+  else if(opt.punch){ sx = 1.12; sy = 0.90; }
+  else if(opt.moving){ sx = 1.05; sy = 0.96; }
+  return {sx, sy};
+}
 /* same signature as before — everything downstream keeps working */
 function drawFigure(x,y,opt){
   const pal = {
-    o: "#12121e",
+    o: opt.smb? "#000000" : "#12121e",
     h: opt.hair, s: opt.skin, c: opt.shirt, p: opt.pants,
     b: opt.boots || C(230,15,16),
-    e: opt.eye || "#12121e",
+    e: opt.eye || (opt.smb? "#000000" : "#12121e"),
   };
-  drawSprite(spriteRows(opt), x, y, pal, (opt.face||1)<0, 2);
+  const rows = spriteRows(opt);
+  const flip = (opt.face||1)<0;
+  if(opt.smb){
+    const {sx, sy} = smbSquashScale(opt);
+    bctx.save();
+    bctx.translate(x|0, y|0);
+    bctx.scale(sx, sy);
+    drawSpriteOutline(rows, 0, 0, flip, 2);
+    drawSprite(rows, 0, 0, pal, flip, 2);
+    bctx.restore();
+  } else {
+    drawSprite(rows, x, y, pal, flip, 2);
+  }
 }
 function drawShadowMonster(x,y,e){
   // the exact same body as a person — that's the point — swallowed in shadow
+  // SMB sketch: only generic mobs get chunkier ink + kinetic squash — family shadows stay literal
   SAT_push(1);
   const bob = Math.sin(e.t*3)*1.5;
-  const body = e.hurt>0? "#9a94b8" : "#0d0918";
-  const pal = { o:"#070510", h:body, s:body, c:body, p:body, b:body,
+  const chunky = smbAct1() && e.generic;
+  const body = e.hurt>0? (chunky? "#c8c0e8" : "#9a94b8") : (chunky? "#050308" : "#0d0918");
+  const pal = { o: chunky? "#000000" : "#070510", h:body, s:body, c:body, p:body, b:body,
                 e: e.hurt>0? "#ffffff" : C(350,90,58) };
-  drawSprite(spriteRows({moving:true, frame:(e.t*10)|0, punch:e.lunge>0.6}),
-             x, y+bob*0.5, pal, e.dir<0, 2);
+  const rows = spriteRows({moving:true, frame:(e.t*10)|0, punch:e.lunge>0.6});
+  const flip = e.dir<0;
+  const yy = y+bob*0.5;
+  if(chunky){
+    const lunging = e.lunge>0.6;
+    const sx = lunging? 1.14 : (e.hurt>0? 1.1 : 1.04);
+    const sy = lunging? 0.88 : (e.hurt>0? 0.9 : 0.97);
+    bctx.save();
+    bctx.translate(x|0, yy|0);
+    bctx.scale(sx, sy);
+    drawSpriteOutline(rows, 0, 0, flip, 2);
+    drawSprite(rows, 0, 0, pal, flip, 2);
+    bctx.restore();
+  } else {
+    drawSprite(rows, x, yy, pal, flip, 2);
+  }
   SAT_pop();
 }
 
@@ -565,8 +621,9 @@ function updateAct1(dt){
   p.x = Math.max(14, Math.min(W1-8, p.x));
   if(p.y>=GROUND){
     p.y=GROUND; p.vy=0; p.onGround=true;
-    if(wasAir){ puff(p.x, p.y, C(30,15,55), 5, 26); sfx("land"); }
-  }
+    if(wasAir){ puff(p.x, p.y, C(30,15,55), 5, 26); sfx("land"); if(smbAct1()) p.landSquash=0.12; }
+  } else p.onGround=false;
+  if(p.landSquash>0) p.landSquash = Math.max(0, p.landSquash-dt);
   if(p.vx!==0 && p.onGround) p.frame++;
 
   // walls — the level demands potions
@@ -952,13 +1009,23 @@ function renderWorld(){
       }
     }
     drawFigure(p.x-cam, p.y, {
-      skin: wd? C(30,25,60): C(30,50,68),
-      shirt: wd? C(215,20,35): C(215,70,45),
-      pants: C(230,25,25),
-      hair: C(25,40,25),
+      skin: wd? C(30,25,60): (smbAct1()? C(18,55,72): C(30,50,68)),
+      shirt: wd? C(215,20,35): (smbAct1()? C(355,85,48): C(215,70,45)),
+      pants: smbAct1()? C(230,35,18): C(230,25,25),
+      hair: smbAct1()? C(20,55,18): C(25,40,25),
       face:p.face, frame:p.frame, moving:p.vx!==0,
-      punch:p.atk>0
+      punch:p.atk>0,
+      smb: smbAct1(),
+      air: smbAct1() && !p.onGround,
+      landSquash: p.landSquash||0
     });
+    // kinetic speed streak — Act I sketch only, never on the walk home
+    if(smbAct1() && Math.abs(p.vx)>40){
+      const trail = Math.min(0.35, Math.abs(p.vx)/280);
+      bctx.fillStyle = `rgba(0,0,0,${trail})`;
+      for(let i=1;i<=3;i++)
+        bctx.fillRect((p.x-cam - p.face*i*4 - 2)|0, (p.y-28)|0, 3, 20);
+    }
     if(p.buzz>0){ // euphoria sparkle
       bctx.fillStyle=`hsla(285,90%,75%,${0.5+Math.sin(performance.now()/80)*0.3})`;
       bctx.fillRect((p.x-cam-6+Math.random()*12)|0,(p.y-36-Math.random()*6)|0,1,1);
@@ -1012,6 +1079,8 @@ function renderTitle(){
   T("they say everything is better in the east.", VW/2, 82, 7, "#cfcfe0", "center");
   if(day>1) T("DAY "+day, VW/2, 98, 8, "#c9a9e0", "center");
   T("ARROWS / WASD move    SPACE jump    J attack    M mute", VW/2, 118, 6, "#9a9ab0", "center");
+  T(smbSketch? "V · chunky sketch ON (Act I only)" : "V · optional chunky sketch", VW/2, 128, 5,
+    smbSketch? "#e8a090" : "#6a6a7a", "center");
   if((performance.now()/500|0)%2===0)
     T("PRESS ENTER", VW/2, 140, 7, "#fff", "center");
   const b = TITLE_START;
@@ -1096,7 +1165,8 @@ function frame(now){
 
   // render
   bctx.save();
-  if(shake>0) bctx.translate((Math.random()-0.5)*3|0,(Math.random()-0.5)*3|0);
+  const shakeAmt = shake>0? (smbAct1()? 5:3) : 0;
+  if(shakeAmt) bctx.translate((Math.random()-0.5)*shakeAmt|0,(Math.random()-0.5)*shakeAmt|0);
   if(state==="title") renderTitle();
   else if(state==="turn") renderTurn(dt);
   else if(state==="end") renderEnd(dt);
