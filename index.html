@@ -408,12 +408,102 @@ function SAT_push(v){ _satStack.push(SAT); SAT=v; }
 function SAT_pop(){ SAT=_satStack.pop(); }
 
 /* ---------- background ---------- */
+/* zoned journey (sketch fork): green near home → city at the bar. Soft blend, no ink slabs. */
+function zoneCityAmt(wx){
+  // bar @ 2120 — full city; home @ 30 — full green; soft ramp through middle
+  if(wx < 1050) return 0;
+  if(wx > 1950) return 1;
+  return (wx - 1050) / 900;
+}
+function lerp3(a, b, t){
+  return [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t];
+}
+function drawGreenFar(night){
+  for(let i=-1;i<9;i++){
+    const hx = i*180 - (cam*0.25)%180;
+    rect(hx, 96, 130, 60, night? C(240,18,20): C(150,45,30));
+    rect(hx+30, 84, 70, 70, night? C(245,16,16): C(155,50,24));
+  }
+}
+function drawGreenMid(night){
+  for(let i=-1;i<12;i++){
+    const tx = i*130 - (cam*0.6)%130;
+    rect(tx+20, 112, 6, 38, night? C(250,12,14): C(25,45,25));
+    rect(tx+10, 96, 26, 22, night? C(250,14,18): C(115,45,28));
+  }
+}
+function drawGreenGround(night){
+  rect(0, GROUND, VW, VH-GROUND, night? C(245,14,17): C(95,40,26));
+  rect(0, GROUND, VW, 3, night? C(245,12,26): C(95,45,38));
+  rect(0, GROUND+3, VW, 1, night? C(245,10,12): C(95,40,20));
+  for(let i=0;i<14;i++){
+    const gx = (i*61 - cam)%(VW+60);
+    rect(gx, GROUND+8+(i%3)*6, 5, 2, night? C(245,10,12): C(95,35,20));
+  }
+  for(let i=0;i<7;i++){
+    const sx = ((i*127 - cam) % (VW+60) + VW+60) % (VW+60) - 20;
+    rect(sx, GROUND+3, 9, 3, night? C(245,8,21): C(40,25,34));
+    rect(sx+2, GROUND+3, 5, 1, night? C(245,8,26): C(40,25,42));
+  }
+}
+function drawCityFar(night){
+  for(let i=-1;i<14;i++){
+    const bx = i*52 - (cam*0.22)%52;
+    const h = 38 + ((i*17)%5)*10 + (i%3)*6;
+    const top = GROUND - h - 18;
+    rect(bx, top, 46, h+18, night? C(230,12, 16+((i*3)%6)) : C(220,18, 28+((i*3)%8)));
+    bctx.fillStyle = night? "rgba(180,190,220,0.06)" : `hsla(48,${40*SAT}%,70%,0.08)`;
+    for(let wy=0; wy<3; wy++)
+      bctx.fillRect((bx+6)|0, (top+10+wy*12)|0, 34, 4);
+    bctx.fillStyle="rgba(0,0,0,0.10)";
+    bctx.fillRect(bx|0, GROUND-8, 46, 8);
+  }
+}
+function drawCityMid(night){
+  for(let i=-1;i<10;i++){
+    const bx = i*78 - (cam*0.55)%78;
+    const h = 28 + (i%4)*8;
+    rect(bx+4, GROUND-h, 38, h, night? C(225,10, 20+(i%4)*2) : C(210,22, 32+(i%5)*3));
+    bctx.fillStyle = night? "rgba(160,170,200,0.08)" : `hsla(200,${30*SAT}%,75%,0.12)`;
+    bctx.fillRect((bx+10)|0, (GROUND-h+8)|0, 10, 6);
+    bctx.fillRect((bx+24)|0, (GROUND-h+8)|0, 10, 6);
+    if(i%3===0){
+      rect(bx+42, GROUND-34, 2, 34, night? C(230,8,18): C(40,15,30));
+      bctx.fillStyle = night? "rgba(200,200,220,0.10)" : `hsla(45,${70*SAT}%,70%,0.22)`;
+      bctx.fillRect((bx+38)|0, (GROUND-38)|0, 10, 6);
+    }
+    bctx.fillStyle="rgba(0,0,0,0.08)";
+    bctx.fillRect((bx+4)|0, GROUND-6, 38, 6);
+  }
+}
+function drawCityGround(night){
+  rect(0, GROUND, VW, VH-GROUND, night? C(235,10,16): C(220,12,22));
+  rect(0, GROUND, VW, 3, night? C(235,8,22): C(220,10,30));
+  rect(0, GROUND+3, VW, 1, night? C(235,6,14): C(220,8,18));
+  bctx.fillStyle="rgba(0,0,0,0.10)";
+  bctx.fillRect(0, GROUND+4, VW, 16);
+  for(let i=0;i<8;i++){
+    const sx = ((i*70 - cam*0.9) % (VW+40) + VW+40) % (VW+40) - 10;
+    rect(sx, GROUND+10, 12, 2, night? C(220,8,28): C(45,20,48));
+  }
+  for(let i=0;i<6;i++){
+    const sx = ((i*90 - cam) % (VW+50) + VW+50) % (VW+50) - 15;
+    rect(sx, GROUND+3, 14, 2, night? C(235,6,20): C(220,8,28));
+  }
+}
 function drawBG(){
   const night = state==="act2";
-  const city = smbAct1(); // soft modern cityscape feel — Act I sketch only
-  // sky gradient (banded, pixel style) — city sketch: slightly hazier urban wash
-  const skyTop = night? [230,20,10] : (city? [210,45,58] : [205,70,62]);
-  const skyBot = night? [235,15,22] : (city? [35,35,62] : [28,85,72]);
+  const zoned = smbSketch && (state==="act1" || state==="act2" || state==="turn" || state==="end" || state==="title");
+  // title uses green; act1/2/turn/end use camera world x
+  const wx = (state==="title")? HOME_X : (cam + VW*0.45);
+  const cityT = zoned? zoneCityAmt(wx) : 0;
+  const greenT = 1 - cityT;
+
+  // sky — soft lerp green↔city (Act II stays crushed via SAT)
+  const dayGreenTop=[205,70,62], dayGreenBot=[28,85,72];
+  const dayCityTop=[210,45,58], dayCityBot=[35,35,62];
+  const skyTop = night? [230,20,10] : lerp3(dayGreenTop, dayCityTop, cityT);
+  const skyBot = night? [235,15,22] : lerp3(dayGreenBot, dayCityBot, cityT);
   for(let i=0;i<12;i++){
     const t=i/11;
     const h=skyTop[0]+(skyBot[0]-skyTop[0])*t;
@@ -428,9 +518,8 @@ function drawBG(){
     bctx.fillStyle=`hsla(45,${90*SAT}%,80%,0.18)`; bctx.fillRect(sx-12,12,38,38);
     rect(sx, 24, 14, 14, C(45,95,75));
     rect(sx+2, 26, 10, 10, C(48,100,85));
-    if(city){
-      // soft haze veil — city air, not hard edges
-      bctx.fillStyle=`hsla(210,${25*SAT}%,70%,0.10)`;
+    if(cityT>0.15){
+      bctx.fillStyle=`hsla(210,${25*SAT}%,70%,${0.10*cityT})`;
       bctx.fillRect(0, 40, VW, 80);
     }
   } else {
@@ -439,92 +528,45 @@ function drawBG(){
     rect(mx, 20, 10, 10, C(220,20,80));
     rect(mx+2, 22, 3, 3, C(220,15,62));
   }
-  // clouds / low fog (city: thinner high haze strips)
+  // clouds
   for(let i=0;i<4;i++){
     const cx = ((i*137 - cam*0.15) % (VW+80) + VW+80) % (VW+80) - 40;
     if(!night){
-      bctx.fillStyle=`hsla(30,${35*SAT}%,88%,${city? 0.28:0.45})`;
-      bctx.fillRect(cx, 22+i*13, city? 56:44, city? 4:6);
-      bctx.fillRect(cx+9, 18+i*13, city? 34:26, 4);
+      bctx.fillStyle=`hsla(30,${35*SAT}%,88%,${0.45 - cityT*0.17})`;
+      bctx.fillRect(cx, 22+i*13, 44+cityT*12, 6-cityT*2);
+      bctx.fillRect(cx+9, 18+i*13, 26+cityT*8, 4);
     } else {
       bctx.fillStyle="rgba(160,160,180,0.08)";
       bctx.fillRect(cx-24, 96+i*16, 110, 7);
     }
   }
-  if(city){
-    // far soft skyline — building masses, painterly, no ink
-    for(let i=-1;i<14;i++){
-      const bx = i*52 - (cam*0.22)%52;
-      const h = 38 + ((i*17)%5)*10 + (i%3)*6;
-      const top = GROUND - h - 18;
-      rect(bx, top, 46, h+18, C(220,18, 28+((i*3)%8)));
-      // soft window wash (not hard grid)
-      bctx.fillStyle=`hsla(48,${40*SAT}%,70%,0.08)`;
-      for(let wy=0; wy<3; wy++)
-        bctx.fillRect((bx+6)|0, (top+10+wy*12)|0, 34, 4);
-      bctx.fillStyle="rgba(0,0,0,0.10)";
-      bctx.fillRect(bx|0, GROUND-8, 46, 8);
+
+  if(zoned && cityT > 0.02){
+    // draw green under city with fade — feel the landscape change
+    if(greenT > 0.05){
+      bctx.globalAlpha = greenT;
+      drawGreenFar(night);
+      drawGreenMid(night);
+      bctx.globalAlpha = 1;
     }
-    // mid street fronts — softer closer blocks + occasional lamp
-    for(let i=-1;i<10;i++){
-      const bx = i*78 - (cam*0.55)%78;
-      const h = 28 + (i%4)*8;
-      rect(bx+4, GROUND-h, 38, h, C(210,22, 32+(i%5)*3));
-      bctx.fillStyle=`hsla(200,${30*SAT}%,75%,0.12)`;
-      bctx.fillRect((bx+10)|0, (GROUND-h+8)|0, 10, 6);
-      bctx.fillRect((bx+24)|0, (GROUND-h+8)|0, 10, 6);
-      if(i%3===0){
-        // soft street lamp
-        rect(bx+42, GROUND-34, 2, 34, C(40,15,30));
-        bctx.fillStyle=`hsla(45,${70*SAT}%,70%,0.22)`;
-        bctx.fillRect((bx+38)|0, (GROUND-38)|0, 10, 6);
-      }
-      bctx.fillStyle="rgba(0,0,0,0.08)";
-      bctx.fillRect((bx+4)|0, GROUND-6, 38, 6);
+    bctx.globalAlpha = Math.min(1, cityT*1.15);
+    drawCityFar(night);
+    drawCityMid(night);
+    bctx.globalAlpha = 1;
+    // ground: blend by painting green then city with alpha
+    if(greenT > 0.08){
+      bctx.globalAlpha = greenT;
+      drawGreenGround(night);
+      bctx.globalAlpha = 1;
     }
-    // street / sidewalk — soft asphalt feel
-    rect(0, GROUND, VW, VH-GROUND, C(220,12,22));
-    rect(0, GROUND, VW, 3, C(220,10,30));
-    rect(0, GROUND+3, VW, 1, C(220,8,18));
-    bctx.fillStyle="rgba(0,0,0,0.10)";
-    bctx.fillRect(0, GROUND+4, VW, 16);
-    // soft lane dashes
-    for(let i=0;i<8;i++){
-      const sx = ((i*70 - cam*0.9) % (VW+40) + VW+40) % (VW+40) - 10;
-      rect(sx, GROUND+10, 12, 2, C(45,20,48));
-    }
-    // sidewalk lip stones — soft, sparse
-    for(let i=0;i<6;i++){
-      const sx = ((i*90 - cam) % (VW+50) + VW+50) % (VW+50) - 15;
-      rect(sx, GROUND+3, 14, 2, C(220,8,28));
-    }
+    bctx.globalAlpha = Math.min(1, cityT*1.2);
+    drawCityGround(night);
+    bctx.globalAlpha = 1;
   } else {
-    // far hills
-    for(let i=-1;i<9;i++){
-      const hx = i*180 - (cam*0.25)%180;
-      rect(hx, 96, 130, 60, night? C(240,18,20): C(150,45,30));
-      rect(hx+30, 84, 70, 70, night? C(245,16,16): C(155,50,24));
-    }
-    // mid trees
-    for(let i=-1;i<12;i++){
-      const tx = i*130 - (cam*0.6)%130;
-      rect(tx+20, 112, 6, 38, night? C(250,12,14): C(25,45,25));
-      rect(tx+10, 96, 26, 22, night? C(250,14,18): C(115,45,28));
-    }
-    // ground
-    rect(0, GROUND, VW, VH-GROUND, night? C(245,14,17): C(95,40,26));
-    rect(0, GROUND, VW, 3, night? C(245,12,26): C(95,45,38));
-    // ground detail: grass lip, path stones, speckle
-    rect(0, GROUND+3, VW, 1, night? C(245,10,12): C(95,40,20));
-    for(let i=0;i<14;i++){
-      const gx = (i*61 - cam)%(VW+60);
-      rect(gx, GROUND+8+(i%3)*6, 5, 2, night? C(245,10,12): C(95,35,20));
-    }
-    for(let i=0;i<7;i++){
-      const sx = ((i*127 - cam) % (VW+60) + VW+60) % (VW+60) - 20;
-      rect(sx, GROUND+3, 9, 3, night? C(245,8,21): C(40,25,34));
-      rect(sx+2, GROUND+3, 5, 1, night? C(245,8,26): C(40,25,42));
-    }
+    // default house pastoral (or full green near home in sketch)
+    drawGreenFar(night);
+    drawGreenMid(night);
+    drawGreenGround(night);
   }
   drawLandmarks();
 }
@@ -538,63 +580,38 @@ const LANDMARKS = [
 ];
 function drawLandmarks(){
   const real = state==="act2";
-  const city = smbAct1(); // urban-fantasy skins — same bones, soft modern read
+  // Act I sketch: only the bar beats as city; earlier landmarks stay fantasy soft
+  const urbanBar = smbAct1();
   for(let i=0;i<LANDMARKS.length;i++){
     const lm = LANDMARKS[i];
     const x = (lm.x - cam)|0;
     if(x<-90||x>VW+90) continue;
     if(!real){
-      if(city){
-        // soft modern city feeling — still adventure-tinted, not photo-real
-        if(i===0){ // civic hall / school-as-keep
-          rect(x-34,GROUND-52,68,52,C(255,18,36));
-          rect(x-38,GROUND-58,76,8,C(255,16,30));
-          for(let w=0;w<4;w++){
-            bctx.fillStyle=`hsla(200,${35*SAT}%,70%,0.22)`;
-            bctx.fillRect(x-26+w*16, GROUND-44, 10, 10);
-          }
-          rect(x-6,GROUND-18,12,18,C(255,14,24));
-          rect(x+22,GROUND-70,4,20,C(350,55,48)); // soft banner, not hard ink flag
-          bctx.fillStyle="rgba(0,0,0,0.10)"; bctx.fillRect(x-34,GROUND-10,68,10);
-        } else if(i===1){ // twin apartment towers (dorms)
-          rect(x-30,GROUND-76,22,76,C(250,16,34));
-          rect(x+10,GROUND-90,22,90,C(250,16,30));
-          for(let r=0;r<5;r++){
-            bctx.fillStyle=`hsla(48,${40*SAT}%,72%,0.14)`;
-            bctx.fillRect(x-24, GROUND-68+r*12, 12, 5);
-            bctx.fillRect(x+16, GROUND-82+r*12, 12, 5);
-          }
-          bctx.fillStyle="rgba(0,0,0,0.10)";
-          bctx.fillRect(x-30,GROUND-12,22,12); bctx.fillRect(x+10,GROUND-12,22,12);
-        } else if(i===2){ // glass office tower
-          rect(x-18,GROUND-100,36,100,C(210,20,38));
-          for(let wy=0;wy<8;wy++){
-            bctx.fillStyle=`hsla(195,${45*SAT}%,70%,0.16)`;
-            bctx.fillRect(x-12, GROUND-92+wy*11, 24, 5);
-          }
-          rect(x-22,GROUND-106,44,8,C(210,18,32));
-          bctx.fillStyle="rgba(0,0,0,0.10)"; bctx.fillRect(x-18,GROUND-14,36,14);
-        } else { // neon storefront den
-          rect(x-30,GROUND-38,60,38,C(280,28,26));
-          rect(x-12,GROUND-24,24,24,C(285,65,42));
-          bctx.fillStyle=`hsla(285,${70*SAT}%,60%,0.28)`; bctx.fillRect(x-18,GROUND-34,36,14);
-          rect(x-22,GROUND-44,44,7,C(300,55,48));
-          bctx.fillStyle="rgba(0,0,0,0.08)"; bctx.fillRect(x-30,GROUND-8,60,8);
-        }
-      } else if(i===0){ // castle keep
+      if(urbanBar && i===3){ // neon storefront den — the city beat
+        rect(x-30,GROUND-38,60,38,C(280,28,26));
+        rect(x-12,GROUND-24,24,24,C(285,65,42));
+        bctx.fillStyle=`hsla(285,${70*SAT}%,60%,0.28)`; bctx.fillRect(x-18,GROUND-34,36,14);
+        rect(x-22,GROUND-44,44,7,C(300,55,48));
+        bctx.fillStyle="rgba(0,0,0,0.08)"; bctx.fillRect(x-30,GROUND-8,60,8);
+      } else if(i===0){ // castle keep (school) — green-zone fantasy
         rect(x-30,GROUND-56,60,56,C(260,25,30));
         for(let b=0;b<5;b++) rect(x-30+b*13,GROUND-62,7,6,C(260,25,30));
         rect(x-4,GROUND-78,4,22,C(260,20,24)); rect(x,GROUND-78,10,6,C(350,70,50));
         rect(x-8,GROUND-30,8,12,C(260,20,18)); rect(x+8,GROUND-40,6,6,C(55,80,65));
-      } else if(i===1){ // twin spires
+      } else if(i===1){ // twin spires (dorms) — mid journey
         rect(x-26,GROUND-70,16,70,C(250,25,28)); rect(x+10,GROUND-84,16,84,C(250,25,24));
         rect(x-30,GROUND-78,24,8,C(250,25,32)); rect(x+6,GROUND-92,24,8,C(250,25,28));
         rect(x-22,GROUND-50,6,6,C(55,80,60)); rect(x+14,GROUND-60,6,6,C(55,80,60));
-      } else if(i===2){ // dark tower
+      } else if(i===2){ // dark tower (office) — edge of town before the city beat
         rect(x-16,GROUND-95,32,95,C(240,20,18));
         for(let wy=0;wy<6;wy++) rect(x-8,GROUND-88+wy*14,4,5,C(55,90,60));
         rect(x-20,GROUND-100,40,7,C(240,20,14));
-      } else { // the glowing den
+        if(urbanBar){
+          // soft glass wash — hint of modern without leaving fantasy bones
+          bctx.fillStyle=`hsla(195,${40*SAT}%,70%,0.10)`;
+          for(let wy=0;wy<5;wy++) bctx.fillRect(x-10, GROUND-88+wy*14, 20, 4);
+        }
+      } else { // glowing den (non-sketch)
         rect(x-28,GROUND-40,56,40,C(280,30,22));
         rect(x-10,GROUND-26,20,26,C(285,70,45));
         bctx.fillStyle=`hsla(285,${70*SAT}%,60%,0.25)`; bctx.fillRect(x-16,GROUND-32,32,32);
