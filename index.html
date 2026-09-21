@@ -43,7 +43,7 @@ addEventListener("keydown", e=>{
   initAudio();
   if(e.key==="m"||e.key==="M") musicOn = !musicOn;
   // experimental Act I art fork — chunky high-contrast sketch (off by default)
-  if(e.key==="v"||e.key==="V"){
+  if((e.key==="v"||e.key==="V") && !e.repeat){
     smbSketch = !smbSketch;
     try{ localStorage.setItem("potions_smb_sketch", smbSketch? "1":"0"); }catch(err){}
   }
@@ -1131,11 +1131,12 @@ function renderWorld(){
       landSquash: p.landSquash||0
     });
     // kinetic speed streak — Act I sketch only, never on the walk home
+    // offset past the 24px sprite so bars read as a trail, not torso paint
     if(smbAct1() && Math.abs(p.vx)>40){
       const trail = Math.min(0.35, Math.abs(p.vx)/280);
       bctx.fillStyle = `rgba(0,0,0,${trail})`;
       for(let i=1;i<=3;i++)
-        bctx.fillRect((p.x-cam - p.face*i*4 - 2)|0, (p.y-28)|0, 3, 20);
+        bctx.fillRect((p.x-cam - p.face*(16 + i*5) - 2)|0, (p.y-28)|0, 3, 20);
     }
     if(p.buzz>0){ // euphoria sparkle
       bctx.fillStyle=`hsla(285,90%,75%,${0.5+Math.sin(performance.now()/80)*0.3})`;
